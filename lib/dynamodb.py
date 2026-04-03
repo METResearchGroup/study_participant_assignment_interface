@@ -115,7 +115,12 @@ def put_user_assignment(
         "payload": _serialize_payload(payload),
         "created_at": created_at,
     }
-    table.put_item(Item=item)
+    table.put_item(
+        Item=item,
+        ConditionExpression=(
+            "attribute_not_exists(study_id) AND attribute_not_exists(iteration_user_key)"
+        ),
+    )
 
     return UserAssignmentRecord(
         study_id=study_id,
