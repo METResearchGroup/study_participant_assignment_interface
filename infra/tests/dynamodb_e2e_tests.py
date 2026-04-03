@@ -73,7 +73,18 @@ def main() -> None:
         raise AssertionError("get_user_assignment returned None after put_user_assignment")
 
     _assert_equal(fetched.study_id, stored.study_id, "Study ID mismatch")
+    _assert_equal(
+        fetched.study_iteration_id,
+        stored.study_iteration_id,
+        "study_iteration_id mismatch",
+    )
     _assert_equal(fetched.user_id, stored.user_id, "User ID mismatch")
+    expected_iteration_user_key = f"{stored.study_iteration_id}#{stored.user_id}"
+    _assert_equal(
+        fetched.iteration_user_key,
+        expected_iteration_user_key,
+        "iteration_user_key must match study_iteration_id#user_id",
+    )
     _assert_equal(
         fetched.payload.model_dump(),
         stored.payload.model_dump(),
