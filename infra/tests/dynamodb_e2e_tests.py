@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+
+from lib.dynamodb import (
+    UserAssignmentPayload,
+    get_user_assignment,
+    increment_assignment_counter,
+    put_user_assignment,
+)
 
 TEST_ENV_PREFIX = "dev"
 
@@ -27,17 +32,6 @@ def _assert_equal(actual, expected, message: str) -> None:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[2]
-    if str(root) not in sys.path:
-        sys.path.append(str(root))
-
-    from lib.dynamodb import (  # pylint: disable=import-error
-        UserAssignmentPayload,
-        get_user_assignment,
-        increment_assignment_counter,
-        put_user_assignment,
-    )
-
     region_name = _require_env("AWS_REGION")
     user_assignments_table = _require_env("USER_ASSIGNMENTS_TABLE_NAME")
     assignment_counter_table = _require_env("STUDY_ASSIGNMENT_COUNTER_TABLE_NAME")

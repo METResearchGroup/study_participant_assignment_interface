@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Any
 
 import boto3
 from pydantic import BaseModel
+
+from lib.timestamp_utils import get_current_timestamp
 
 
 class UserAssignmentPayload(BaseModel):
@@ -33,10 +33,6 @@ class StudyAssignmentCounterRecord(BaseModel):
     counter: int
     created_at: str
     last_updated_at: str
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _build_iteration_user_key(study_iteration_id: str, user_id: str) -> str:
@@ -108,7 +104,7 @@ def put_user_assignment(
 ) -> UserAssignmentRecord:
     table = _get_table(table_name, region_name=region_name)
     iteration_user_key = _build_iteration_user_key(study_iteration_id, user_id)
-    created_at = _now_iso()
+    created_at = get_current_timestamp()
 
     item = {
         "study_id": study_id,
@@ -142,7 +138,7 @@ def increment_assignment_counter(
     iteration_assignment_key = _build_iteration_assignment_key(
         study_iteration_id, study_unique_assignment_key
     )
-    timestamp = _now_iso()
+    timestamp = get_current_timestamp()
 
     response = table.update_item(
         Key={
