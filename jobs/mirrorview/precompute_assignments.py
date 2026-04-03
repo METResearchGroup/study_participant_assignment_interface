@@ -221,7 +221,9 @@ def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
     splits = split_input_posts_by_stance_toxicity(input_posts)
 
     assigned_post_ids: list[str] = []
-    for _ in range(TOTAL_RECORDS_TO_CREATE):
+    for i in range(TOTAL_RECORDS_TO_CREATE):
+        if i % 100 == 0:
+            print(f"Generated {i:04d}/{TOTAL_RECORDS_TO_CREATE:04d} assignments.")
         sampled, _ = _generate_one_assignment(splits)
         post_ids = [str(primary_key) for primary_key in sampled["post_primary_key"].tolist()]
         assigned_post_ids.append(json.dumps(post_ids))
