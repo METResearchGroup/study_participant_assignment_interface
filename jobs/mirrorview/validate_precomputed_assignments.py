@@ -89,6 +89,26 @@ def _validate_post_ids_are_list(raw_post_ids: str, context: str) -> None:
             raise TypeError(f"{context}: assigned_post_ids must be a list of strings")
 
 
+def _validate_expected_condition(
+    row_condition: str, context: str, condition: str, political_party: str
+) -> None:
+    if row_condition != condition:
+        raise AssertionError(
+            f"{context}: column 'condition' is {row_condition!r}, "
+            f"expected {condition!r} (from path {political_party}/{condition})"
+        )
+
+
+def _validate_expected_political_party(
+    row_political_party: str, context: str, condition: str, political_party: str
+) -> None:
+    if row_political_party != political_party:
+        raise AssertionError(
+            f"{context}: column 'political_party' is {row_political_party!r}, "
+            f"expected {political_party!r} (from path {political_party}/{condition})"
+        )
+
+
 def validate_assignments_file(
     csv_path: Path,
     lookup: pd.DataFrame,
@@ -103,27 +123,31 @@ def validate_assignments_file(
 
     _validate_no_missing_columns(df, csv_path)
 
-    for row_offset, (_, row) in enumerate(df.iterrows()):
-        row_num = row_offset + 2  # 1-based sheet row, +1 for header
-        context = f"{csv_path} row {row_num} ({row.get('id', '')!r})"
-        if row["condition"] != condition:
-            raise AssertionError(
-                f"{context}: column 'condition' is {row['condition']!r}, "
-                f"expected {condition!r} (from path {political_party}/{condition})"
-            )
-        if row["political_party"] != political_party:
-            raise AssertionError(
-                f"{context}: column 'political_party' is {row['political_party']!r}, "
-                f"expected {political_party!r} (from path {political_party}/{condition})"
-            )
-        raw_post_ids = row["assigned_post_ids"]
+    for row_num, row in enumerate(df.itertuples(index=False, name=None), start=2):
+        assignment_id, raw_post_ids, row_political_party, row_condition, _created_at = row
+        context = f"{csv_path} row {row_num} ({assignment_id!r})"
+        _validate_expected_condition(
+            row_condition=row_condition,
+            context=context,
+            condition=condition,
+            political_party=political_party,
+        )
+        _validate_expected_political_party(
+            row_political_party=row_political_party,
+            context=context,
+            condition=condition,
+            political_party=political_party,
+        )
         post_ids = json.loads(str(raw_post_ids))
         if not isinstance(post_ids, list):
             raise TypeError(f"{context}: assigned_post_ids must decode to a list")
         sampled = _assigned_posts_to_sampled([str(x) for x in post_ids], lookup, context=context)
-        left_n = int((sampled["sampled_stance"] == "left").sum())
-        right_n = int((sampled["sampled_stance"] == "right").sum())
-        oversample_left = _infer_oversample_left(left_n, right_n)
+
+        total_left_leaning_posts = int((sampled["sampled_stance"] == "left").sum())
+        total_right_leaning_posts = int((sampled["sampled_stance"] == "right").sum())
+        oversample_left = _infer_oversample_left(
+            total_left_leaning_posts, total_right_leaning_posts
+        )
         pre._validate_assignment_invariants(sampled, oversample_left)
 
     return len(df)
