@@ -21,3 +21,26 @@ The initial design will have this high-level setup:
 - S3 for blob storage.
 - DynamoDB for atomic assignment.
 - Lambdas for intermediate operations (e.g., running precomputation, accessing assignments from DynamoDB).
+
+### Proposed tables
+
+`user_assignments`
+
+- study_id: str
+- study_iteration_id: str
+- user_id: str (can use the user's prolific ID here)
+- payload: str (JSON string that can be configured to have whatever we want).
+- created_at: str
+
+PK: (study_id, study_iteration_id,)
+
+`study_assignment_counter`
+
+- study_id: str
+- study_iteration_id: str
+- study_unique_assignment_key: str (can, for example, use (politica_party, condition) for the MirrorView project).
+- counter: int (this is the unit that we're updating).
+- created_at: str
+- last_updated_at: str
+
+Can see if we should make the timestamp fields a native timestamp time or just a string. This just updates where we move stuff later on.
