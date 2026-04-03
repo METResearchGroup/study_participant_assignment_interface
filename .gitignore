@@ -190,6 +190,11 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+
 # PyPI configuration file
 .pypirc
 
