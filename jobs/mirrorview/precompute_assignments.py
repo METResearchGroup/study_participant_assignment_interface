@@ -91,6 +91,7 @@ def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool
     if len(sampled) != TOTAL_POSTS_TO_ASSIGN:
         raise AssertionError(f"Expected {TOTAL_POSTS_TO_ASSIGN} posts, got {len(sampled)}")
 
+    # validate toxicity counts
     tox_col = sampled["sample_toxicity_type"]
     low = int((tox_col == "sample_low_toxicity").sum())
     high = int((tox_col == "sample_high_toxicity").sum())
@@ -106,6 +107,7 @@ def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool
             f"{exp_l}/{exp_m}/{exp_h}, got {low}/{mid}/{high}"
         )
 
+    # validate left/right counts
     left_n = int((sampled["sampled_stance"] == "left").sum())
     right_n = int((sampled["sampled_stance"] == "right").sum())
     key = "oversample_left" if oversample_left else "oversample_right"
@@ -115,6 +117,13 @@ def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool
             f"Left/right counts for {key} expected {expected['left']}/{expected['right']}, "
             f"got {left_n}/{right_n}"
         )
+
+
+def _sample_n_rows(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    if len(df) < n:
+        msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
+        raise ValueError(msg)
+    return df.sample(n=n, random_state=RNG).reset_index(drop=True)
 
 
 def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, bool]:
@@ -128,24 +137,24 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
     high_left_n = 3 if oversample_left else 2
     high_right_n = 2 if oversample_left else 3
 
-    def sample_n_or_raise(df: pd.DataFrame, n: int) -> pd.DataFrame:
-        if len(df) < n:
-            msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
-            raise ValueError(msg)
-        return df.sample(n=n, random_state=RNG).reset_index(drop=True)
-
+    # get samples from each subset
     parts = [
-        sample_n_or_raise(splits["left__sample_low_toxicity"], 3),
-        sample_n_or_raise(splits["right__sample_low_toxicity"], 2),
-        sample_n_or_raise(splits["left__sample_middle_toxicity"], 5),
-        sample_n_or_raise(splits["right__sample_middle_toxicity"], 5),
-        sample_n_or_raise(splits["left__sample_high_toxicity"], high_left_n),
-        sample_n_or_raise(splits["right__sample_high_toxicity"], high_right_n),
+        _sample_n_rows(df=splits["left__sample_low_toxicity"], n=3),
+        _sample_n_rows(df=splits["right__sample_low_toxicity"], n=2),
+        _sample_n_rows(df=splits["left__sample_middle_toxicity"], n=5),
+        _sample_n_rows(df=splits["right__sample_middle_toxicity"], n=5),
+        _sample_n_rows(df=splits["left__sample_high_toxicity"], n=high_left_n),
+        _sample_n_rows(df=splits["right__sample_high_toxicity"], n=high_right_n),
     ]
+
+    # combine results and shuffle
     combined = pd.concat(parts, ignore_index=True)
     perm = RNG.permutation(len(combined))
     combined = combined.iloc[perm].reset_index(drop=True)
+
+    # validate invariants
     _validate_assignment_invariants(combined, oversample_left)
+
     return combined, oversample_left
 
 
