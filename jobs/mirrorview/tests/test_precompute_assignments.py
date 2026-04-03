@@ -76,14 +76,6 @@ def _oversample_right_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def input_posts_to_splits(posts: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Mirror production split logic."""
-    return {
-        key: posts.loc[posts["stance_toxicity_key"] == key].reset_index(drop=True)
-        for key in pa.POST_CATEGORIES
-    }
-
-
 class TestValidateAssignmentInvariants:
     """Tests for _validate_assignment_invariants function."""
 
@@ -144,7 +136,7 @@ class TestGenerateOneAssignment:
     def test_returns_twenty_rows_and_valid_invariants(self):
         """Sampled bundle has 20 rows and satisfies invariants for the returned flag."""
         posts = minimal_input_posts(5)
-        splits = input_posts_to_splits(posts)
+        splits = pa.split_input_posts_by_stance_toxicity(posts)
         result, oversample_left = pa._generate_one_assignment(splits)
         assert len(result) == 20
         pa._validate_assignment_invariants(result, oversample_left)
@@ -152,7 +144,7 @@ class TestGenerateOneAssignment:
     def test_bucket_counts_match_spec(self):
         """Per-bucket stance_toxicity_key counts follow low/mid/high draws."""
         posts = minimal_input_posts(5)
-        splits = input_posts_to_splits(posts)
+        splits = pa.split_input_posts_by_stance_toxicity(posts)
         result, oversample_left = pa._generate_one_assignment(splits)
         counts = result.groupby("stance_toxicity_key", observed=True).size()
         for key in pa.POST_CATEGORIES:
@@ -171,14 +163,14 @@ class TestGenerateOneAssignment:
     def test_raises_when_pool_too_small(self):
         """Undersized pool raises ValueError mentioning bucket size."""
         posts = minimal_input_posts(1)
-        splits = input_posts_to_splits(posts)
+        splits = pa.split_input_posts_by_stance_toxicity(posts)
         with pytest.raises(ValueError, match="at least 3"):
             pa._generate_one_assignment(splits)
 
     def test_no_duplicate_primary_keys_within_bundle(self):
         """A bundle never contains the same post_primary_key twice."""
         posts = minimal_input_posts(5)
-        splits = input_posts_to_splits(posts)
+        splits = pa.split_input_posts_by_stance_toxicity(posts)
         result, _ = pa._generate_one_assignment(splits)
         keys = result["post_primary_key"].tolist()
         assert len(keys) == len(set(keys))
@@ -233,7 +225,7 @@ class TestGeneratePrecomputedAssignments:
     def test_oversample_left_rate_near_half_over_many_draws(self):
         """Bernoulli oversample should not be stuck always True/False."""
         posts = minimal_input_posts(5)
-        splits = input_posts_to_splits(posts)
+        splits = pa.split_input_posts_by_stance_toxicity(posts)
         pa.RNG = np.random.default_rng(pa.RANDOM_SEED)
         n = 400
         n_left = sum(pa._generate_one_assignment(splits)[1] for _ in range(n))

@@ -126,6 +126,19 @@ def _sample_n_rows(df: pd.DataFrame, n: int) -> pd.DataFrame:
     return df.sample(n=n, random_state=RNG).reset_index(drop=True)
 
 
+def split_input_posts_by_stance_toxicity(
+    input_posts: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """Split posts into stance/toxicity buckets used for bundle sampling."""
+    if "stance_toxicity_key" not in input_posts.columns:
+        raise ValueError("input_posts must include a 'stance_toxicity_key' column")
+
+    return {
+        key: input_posts.loc[input_posts["stance_toxicity_key"] == key].reset_index(drop=True)
+        for key in POST_CATEGORIES
+    }
+
+
 def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, bool]:
     """Sample one valid 20-post bundle from pre-split stance/toxicity pools.
 
@@ -205,13 +218,7 @@ def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
     implement sampling without replacement, and since we include randomness,
     then in expectation this'll lead to a balanced representation.
     """
-    if "stance_toxicity_key" not in input_posts.columns:
-        raise ValueError("input_posts must include a 'stance_toxicity_key' column")
-
-    splits = {
-        key: input_posts.loc[input_posts["stance_toxicity_key"] == key].reset_index(drop=True)
-        for key in POST_CATEGORIES
-    }
+    splits = split_input_posts_by_stance_toxicity(input_posts)
 
     assigned_post_ids: list[str] = []
     for _ in range(TOTAL_RECORDS_TO_CREATE):
