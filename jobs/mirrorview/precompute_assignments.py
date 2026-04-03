@@ -228,8 +228,16 @@ def generate_and_export_precomputed_assignments(
 def generate_and_export_all_precomputed_assignments(input_posts: pd.DataFrame):
     for political_party in POLITICAL_PARTIES:
         for condition in STUDY_CONDITIONS:
+            print(
+                f"Generating precomputed assignments: political_party={political_party!r}, "
+                f"condition={condition!r} …"
+            )
             generate_and_export_precomputed_assignments(
                 input_posts=input_posts, political_party=political_party, condition=condition
+            )
+            print(
+                f"Finished precomputed assignments: political_party={political_party!r}, "
+                f"condition={condition!r}."
             )
 
 
