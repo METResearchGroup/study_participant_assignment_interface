@@ -6,7 +6,7 @@ for the cartesian product of POLITICAL_PARTIES and STUDY_CONDITIONS.
 
 Usage (from repo root):
 
-    uv run python jobs/mirrorview/validate_precomputed_assignments.py \\
+    uv run python -m jobs.mirrorview.validate_precomputed_assignments \\
         --path data/mirrorview/2026_04_03-09:36:03
 """
 
@@ -14,13 +14,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
-
-if str(Path(__file__).resolve().parents[2]) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import jobs.mirrorview.precompute_assignments as pre
 from lib.constants import ROOT_DIR

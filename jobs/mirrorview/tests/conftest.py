@@ -1,16 +1,11 @@
-"""Pytest configuration: project root on path and isolated RNG per test."""
+"""Pytest configuration: isolated RNG per test."""
 
 from __future__ import annotations
-
-import pathlib
-import sys
 
 import numpy as np
 import pytest
 
-_PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+from lib.constants import ROOT_DIR  # noqa: F401 -- project root; imports use pytest pythonpath
 
 
 @pytest.fixture(autouse=True)
