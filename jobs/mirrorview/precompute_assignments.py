@@ -82,13 +82,6 @@ def write_assignments(
     assignments.to_csv(output_path, index=False)
 
 
-def _sample_n_or_raise(df: pd.DataFrame, n: int, rng: np.random.Generator) -> pd.DataFrame:
-    if len(df) < n:
-        msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
-        raise ValueError(msg)
-    return df.sample(n=n, random_state=rng).reset_index(drop=True)
-
-
 def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool) -> None:
     if len(sampled) != TOTAL_POSTS_TO_ASSIGN:
         raise AssertionError(f"Expected {TOTAL_POSTS_TO_ASSIGN} posts, got {len(sampled)}")
@@ -119,21 +112,31 @@ def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool
         )
 
 
-def _generate_one_assignment(
-    splits: dict[str, pd.DataFrame],
-    rng: np.random.Generator,
-) -> tuple[pd.DataFrame, bool]:
+def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, bool]:
+    """Sample one valid 20-post bundle from pre-split stance/toxicity pools.
+
+    Draws counts per the MirrorView spec (low/middle/high and left/right splits),
+    shuffles row order, validates invariants, and returns the combined frame plus
+    whether the high-toxicity split favored the left bucket.
+    """
+    rng = np.random.default_rng()
     oversample_left = bool(rng.integers(0, 2))
     high_left_n = 3 if oversample_left else 2
     high_right_n = 2 if oversample_left else 3
 
+    def sample_n_or_raise(df: pd.DataFrame, n: int) -> pd.DataFrame:
+        if len(df) < n:
+            msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
+            raise ValueError(msg)
+        return df.sample(n=n, random_state=rng).reset_index(drop=True)
+
     parts = [
-        _sample_n_or_raise(splits["left__sample_low_toxicity"], 3, rng),
-        _sample_n_or_raise(splits["right__sample_low_toxicity"], 2, rng),
-        _sample_n_or_raise(splits["left__sample_middle_toxicity"], 5, rng),
-        _sample_n_or_raise(splits["right__sample_middle_toxicity"], 5, rng),
-        _sample_n_or_raise(splits["left__sample_high_toxicity"], high_left_n, rng),
-        _sample_n_or_raise(splits["right__sample_high_toxicity"], high_right_n, rng),
+        sample_n_or_raise(splits["left__sample_low_toxicity"], 3),
+        sample_n_or_raise(splits["right__sample_low_toxicity"], 2),
+        sample_n_or_raise(splits["left__sample_middle_toxicity"], 5),
+        sample_n_or_raise(splits["right__sample_middle_toxicity"], 5),
+        sample_n_or_raise(splits["left__sample_high_toxicity"], high_left_n),
+        sample_n_or_raise(splits["right__sample_high_toxicity"], high_right_n),
     ]
     combined = pd.concat(parts, ignore_index=True)
     perm = rng.permutation(len(combined))
@@ -142,10 +145,7 @@ def _generate_one_assignment(
     return combined, oversample_left
 
 
-def generate_precomputed_assignments(
-    input_posts: pd.DataFrame,
-    rng: np.random.Generator | None = None,
-) -> pd.DataFrame:
+def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
     """Algorithm:
 
     Split `input_posts` into six subsets:
@@ -196,11 +196,10 @@ def generate_precomputed_assignments(
         for key in POST_CATEGORIES
     }
 
-    rng = rng or np.random.default_rng()
     assigned_post_ids: list[str] = []
     for _ in range(TOTAL_RECORDS_TO_CREATE):
-        sampled, _ = _generate_one_assignment(splits, rng)
-        post_ids = [str(pk) for pk in sampled["post_primary_key"].tolist()]
+        sampled, _ = _generate_one_assignment(splits)
+        post_ids = [str(primary_key) for primary_key in sampled["post_primary_key"].tolist()]
         assigned_post_ids.append(json.dumps(post_ids))
 
     return pd.DataFrame({"assigned_post_ids": assigned_post_ids})
@@ -208,7 +207,8 @@ def generate_precomputed_assignments(
 
 def generate_and_export_precomputed_assignments(
     input_posts: pd.DataFrame, political_party: str, condition: str
-):
+) -> None:
+    """Build assignment rows for one party/condition cell and write assignments.csv."""
     base = generate_precomputed_assignments(input_posts)
     created_at = get_current_timestamp()
     n = len(base)
@@ -225,7 +225,11 @@ def generate_and_export_precomputed_assignments(
     )
 
 
-def generate_and_export_all_precomputed_assignments(input_posts: pd.DataFrame):
+def generate_and_export_all_precomputed_assignments(input_posts: pd.DataFrame) -> None:
+    """Export precomputed assignments for each political party and study condition.
+
+    Writes one assignments.csv per (POLITICAL_PARTIES × STUDY_CONDITIONS) cell.
+    """
     for political_party in POLITICAL_PARTIES:
         for condition in STUDY_CONDITIONS:
             print(
