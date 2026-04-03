@@ -5,8 +5,6 @@ from typing import Any
 
 import boto3
 
-from lib.timestamp_utils import get_current_timestamp
-
 DEFAULT_REGION_NAME = "us-central-2"
 
 
@@ -57,13 +55,3 @@ class S3:
         key = key.lstrip("/")
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         return response["Body"].read()
-
-
-if __name__ == "__main__":
-    bucket = "jspsych-mirror-view-3"
-    prefix = "precomputed_assignments"
-    iteration_ts = get_current_timestamp()
-    object_key = f"{prefix}/{iteration_ts}/test.txt"
-    script_body = b'print("mirrorview-pilot S3 upload OK")\n'
-    store = S3(bucket)
-    store.upload_bytes(object_key, script_body, content_type="text/x-python")
