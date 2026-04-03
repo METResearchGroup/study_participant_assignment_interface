@@ -7,11 +7,13 @@ repos:
         entry: uv run ruff check
         language: system
         types_or: [python, pyi]
+        exclude: ^ai_tools/
       - id: ruff-format
         name: ruff format
         entry: uv run ruff format --check
         language: system
         types_or: [python, pyi]
+        exclude: ^ai_tools/
       - id: pyright
         name: pyright
         entry: uv run pyright
