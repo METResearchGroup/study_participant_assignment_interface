@@ -12,12 +12,19 @@ dependencies = [
 dev = [
     "pre-commit>=4.5.1",
     "pyright>=1.1.408",
+    "pytest>=8.0.0",
     "ruff>=0.15.9",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["jobs/mirrorview/tests"]
+pythonpath = ["."]
+addopts = "-q"
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+exclude = ["ai_tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "W"]
@@ -29,4 +36,4 @@ known-first-party = ["lib"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 include = ["."]
-exclude = [".venv"]
+exclude = [".venv", "ai_tools"]

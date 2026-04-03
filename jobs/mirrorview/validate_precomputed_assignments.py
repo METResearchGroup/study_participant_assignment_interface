@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pandas as pd
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+if str(Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import jobs.mirrorview.precompute_assignments as pre  # noqa: E402
+import jobs.mirrorview.precompute_assignments as pre
+from lib.constants import ROOT_DIR
 
 _EXPECTED_ASSIGNMENT_COLUMNS = ("id", "assigned_post_ids", "condition", "created_at")
 
@@ -117,7 +117,7 @@ def main() -> None:
         "(e.g. data/mirrorview/2026_04_03-05:34:59)",
     )
     args = parser.parse_args()
-    series_root = (_REPO_ROOT / args.path).resolve()
+    series_root = (ROOT_DIR / args.path).resolve()
     validate_series_root(series_root)
     print(f"All checks passed for {series_root}")
 
