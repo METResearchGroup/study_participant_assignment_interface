@@ -7,7 +7,7 @@ for the cartesian product of POLITICAL_PARTIES and STUDY_CONDITIONS.
 Usage (from repo root):
 
     uv run python jobs/mirrorview/validate_precomputed_assignments.py \\
-        --path data/mirrorview/2026_04_03-05:34:59
+        --path data/mirrorview/2026_04_03-09:36:03
 """
 
 from __future__ import annotations
@@ -45,17 +45,18 @@ def _infer_oversample_left(left_n: int, right_n: int) -> bool:
     )
 
 
-def _assigned_posts_to_sampled(
-    post_ids: list[str],
-    lookup: pd.DataFrame,
+def _get_ground_truth_sample_toxicity_political_stance(
     *,
+    post_ids: list[str],
+    ground_truth_post_pool: pd.DataFrame,
     context: str,
 ) -> pd.DataFrame:
+    """For the given row ID, get the ground truth sample toxicity + stance."""
     rows: list[dict[str, str]] = []
     for pid in post_ids:
-        if pid not in lookup.index:
+        if pid not in ground_truth_post_pool.index:
             raise ValueError(f"{context}: unknown post_primary_key {pid!r}")
-        row = lookup.loc[pid]
+        row = ground_truth_post_pool.loc[pid]
         rows.append(
             {
                 "sample_toxicity_type": str(row["sample_toxicity_type"]),
@@ -79,7 +80,7 @@ def _validate_no_missing_columns(df: pd.DataFrame, csv_path: Path) -> None:
         raise ValueError(f"{csv_path}: missing columns {missing}")
 
 
-def _validate_post_ids_are_list(raw_post_ids: str, context: str) -> None:
+def get_post_ids_list(raw_post_ids: str, context: str) -> list[str]:
     """Validates that the assigned post IDs are a list of strings."""
     post_ids = json.loads(str(raw_post_ids))
     if not isinstance(post_ids, list):
@@ -87,6 +88,7 @@ def _validate_post_ids_are_list(raw_post_ids: str, context: str) -> None:
     for pid in post_ids:
         if not isinstance(pid, str):
             raise TypeError(f"{context}: assigned_post_ids must be a list of strings")
+    return post_ids
 
 
 def _validate_expected_condition(
@@ -111,7 +113,7 @@ def _validate_expected_political_party(
 
 def validate_assignments_file(
     csv_path: Path,
-    lookup: pd.DataFrame,
+    ground_truth_post_pool: pd.DataFrame,
     *,
     political_party: str,
     condition: str,
@@ -138,10 +140,12 @@ def validate_assignments_file(
             condition=condition,
             political_party=political_party,
         )
-        post_ids = json.loads(str(raw_post_ids))
-        if not isinstance(post_ids, list):
-            raise TypeError(f"{context}: assigned_post_ids must decode to a list")
-        sampled = _assigned_posts_to_sampled([str(x) for x in post_ids], lookup, context=context)
+        post_ids = get_post_ids_list(raw_post_ids, context)
+        sampled = _get_ground_truth_sample_toxicity_political_stance(
+            post_ids=post_ids,
+            ground_truth_post_pool=ground_truth_post_pool,
+            context=context,
+        )
 
         total_left_leaning_posts = int((sampled["sampled_stance"] == "left").sum())
         total_right_leaning_posts = int((sampled["sampled_stance"] == "right").sum())
@@ -158,27 +162,22 @@ def _validate_root_directory(series_root: Path) -> None:
         raise FileNotFoundError(f"Not a directory: {series_root}")
 
 
-def _validate_unique_primary_keys(input_posts: pd.DataFrame) -> None:
-    if not input_posts["post_primary_key"].is_unique:
-        raise ValueError("Input posts must have unique post_primary_key values")
-
-
 def validate_series_root(series_root: Path) -> None:
     """Validate all assignment CSVs under series_root; raises on first failure."""
     _validate_root_directory(series_root)
 
-    input_posts = pd.read_csv(pre.INPUT_POSTS_PATH)
+    # posts used to generate the assignments (these are the posts that will
+    # actually be shown to participants)
+    ground_truth_post_pool = pd.read_csv(pre.INPUT_POSTS_PATH)
 
-    _validate_unique_primary_keys(input_posts)
-
-    lookup = input_posts.set_index("post_primary_key")
+    ground_truth_post_pool = ground_truth_post_pool.set_index("post_primary_key")
 
     for political_party in pre.POLITICAL_PARTIES:
         for condition in pre.STUDY_CONDITIONS:
             csv_path = series_root / political_party / condition / pre.OUTPUT_RECORDS_FILENAME
             n_rows = validate_assignments_file(
                 csv_path,
-                lookup,
+                ground_truth_post_pool,
                 political_party=political_party,
                 condition=condition,
             )
