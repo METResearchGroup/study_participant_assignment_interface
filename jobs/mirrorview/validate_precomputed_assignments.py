@@ -65,56 +65,100 @@ def _assigned_posts_to_sampled(
     return pd.DataFrame(rows)
 
 
-def validate_series_root(series_root: Path) -> None:
-    """Validate all assignment CSVs under series_root; raises on first failure."""
+def _validate_csv_file_exists(csv_path: Path) -> None:
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            "Expected assignments file missing (layout must match "
+            f"{pre.POLITICAL_PARTIES} x {pre.STUDY_CONDITIONS}): {csv_path}"
+        )
+
+
+def _validate_no_missing_columns(df: pd.DataFrame, csv_path: Path) -> None:
+    missing = [c for c in _EXPECTED_ASSIGNMENT_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"{csv_path}: missing columns {missing}")
+
+
+def _validate_post_ids_are_list(raw_post_ids: str, context: str) -> None:
+    """Validates that the assigned post IDs are a list of strings."""
+    post_ids = json.loads(str(raw_post_ids))
+    if not isinstance(post_ids, list):
+        raise TypeError(f"{context}: assigned_post_ids must decode to a list")
+    for pid in post_ids:
+        if not isinstance(pid, str):
+            raise TypeError(f"{context}: assigned_post_ids must be a list of strings")
+
+
+def validate_assignments_file(
+    csv_path: Path,
+    lookup: pd.DataFrame,
+    *,
+    political_party: str,
+    condition: str,
+) -> int:
+    """Validate one assignments.csv file for expected schema and row invariants."""
+    _validate_csv_file_exists(csv_path)
+
+    df = pd.read_csv(csv_path)
+
+    _validate_no_missing_columns(df, csv_path)
+
+    for row_offset, (_, row) in enumerate(df.iterrows()):
+        row_num = row_offset + 2  # 1-based sheet row, +1 for header
+        context = f"{csv_path} row {row_num} ({row.get('id', '')!r})"
+        if row["condition"] != condition:
+            raise AssertionError(
+                f"{context}: column 'condition' is {row['condition']!r}, "
+                f"expected {condition!r} (from path {political_party}/{condition})"
+            )
+        if row["political_party"] != political_party:
+            raise AssertionError(
+                f"{context}: column 'political_party' is {row['political_party']!r}, "
+                f"expected {political_party!r} (from path {political_party}/{condition})"
+            )
+        raw_post_ids = row["assigned_post_ids"]
+        post_ids = json.loads(str(raw_post_ids))
+        if not isinstance(post_ids, list):
+            raise TypeError(f"{context}: assigned_post_ids must decode to a list")
+        sampled = _assigned_posts_to_sampled([str(x) for x in post_ids], lookup, context=context)
+        left_n = int((sampled["sampled_stance"] == "left").sum())
+        right_n = int((sampled["sampled_stance"] == "right").sum())
+        oversample_left = _infer_oversample_left(left_n, right_n)
+        pre._validate_assignment_invariants(sampled, oversample_left)
+
+    return len(df)
+
+
+def _validate_root_directory(series_root: Path) -> None:
     if not series_root.is_dir():
         raise FileNotFoundError(f"Not a directory: {series_root}")
 
-    input_posts = pd.read_csv(pre.INPUT_POSTS_PATH)
+
+def _validate_unique_primary_keys(input_posts: pd.DataFrame) -> None:
     if not input_posts["post_primary_key"].is_unique:
         raise ValueError("Input posts must have unique post_primary_key values")
+
+
+def validate_series_root(series_root: Path) -> None:
+    """Validate all assignment CSVs under series_root; raises on first failure."""
+    _validate_root_directory(series_root)
+
+    input_posts = pd.read_csv(pre.INPUT_POSTS_PATH)
+
+    _validate_unique_primary_keys(input_posts)
+
     lookup = input_posts.set_index("post_primary_key")
 
     for political_party in pre.POLITICAL_PARTIES:
         for condition in pre.STUDY_CONDITIONS:
             csv_path = series_root / political_party / condition / pre.OUTPUT_RECORDS_FILENAME
-            if not csv_path.is_file():
-                raise FileNotFoundError(
-                    "Expected assignments file missing (layout must match "
-                    f"{pre.POLITICAL_PARTIES} × {pre.STUDY_CONDITIONS}): {csv_path}"
-                )
-
-            df = pd.read_csv(csv_path)
-            missing = [c for c in _EXPECTED_ASSIGNMENT_COLUMNS if c not in df.columns]
-            if missing:
-                raise ValueError(f"{csv_path}: missing columns {missing}")
-
-            for row_offset, (_, row) in enumerate(df.iterrows()):
-                row_num = row_offset + 2  # 1-based sheet row, +1 for header
-                context = f"{csv_path} row {row_num} ({row.get('id', '')!r})"
-                if row["condition"] != condition:
-                    raise AssertionError(
-                        f"{context}: column 'condition' is {row['condition']!r}, "
-                        f"expected {condition!r} (from path {political_party}/{condition})"
-                    )
-                if row["political_party"] != political_party:
-                    raise AssertionError(
-                        f"{context}: column 'political_party' is {row['political_party']!r}, "
-                        f"expected {political_party!r} (from path {political_party}/{condition})"
-                    )
-                raw_post_ids = row["assigned_post_ids"]
-                post_ids = json.loads(str(raw_post_ids))
-                if not isinstance(post_ids, list):
-                    raise TypeError(f"{context}: assigned_post_ids must decode to a list")
-                sampled = _assigned_posts_to_sampled(
-                    [str(x) for x in post_ids], lookup, context=context
-                )
-                left_n = int((sampled["sampled_stance"] == "left").sum())
-                right_n = int((sampled["sampled_stance"] == "right").sum())
-                oversample_left = _infer_oversample_left(left_n, right_n)
-                pre._validate_assignment_invariants(sampled, oversample_left)
-
-            print(f"OK: {political_party}/{condition} ({len(df)} rows) -> {csv_path}")
+            n_rows = validate_assignments_file(
+                csv_path,
+                lookup,
+                political_party=political_party,
+                condition=condition,
+            )
+            print(f"OK: {political_party}/{condition} ({n_rows} rows) -> {csv_path}")
 
 
 def main() -> None:
