@@ -114,8 +114,6 @@ def main() -> None:
         results = [future.result() for future in futures]
 
     sorted_results = sorted(results)
-    _assert_equal(sorted_results[0], 1, "First concurrent counter value should be 1")
-    _assert_equal(sorted_results[1], 2, "Second concurrent counter value should be 2")
     _assert_equal(
         sorted_results,
         list(range(1, 6)),
