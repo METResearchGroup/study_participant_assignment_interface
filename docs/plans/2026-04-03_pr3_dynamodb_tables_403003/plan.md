@@ -311,7 +311,7 @@ Implementation steps:
   - AWS CLI installation and verification commands
   - AWS credential/profile setup steps needed before running Terraform
   - exact Terraform commands for `init`, `validate`, `plan`, and `apply`
-  - exact smoke-test command using `AWS_REGION=us-east-2`
+  - exact smoke-test command using `AWS_REGION=us-east-2`, run from repo root with `PYTHONPATH=.`
   - exact DynamoDB console checks for `user_assignments` and `study_assignment_counter`
 4. Update [README.md](/Users/mark/Documents/work/worktree_study_participant_assignment_interface/README.md) to link to the runbook instead of duplicating the full deployment instructions.
 
@@ -321,7 +321,7 @@ Verification commands:
 - `uv run ruff check .`
 - `uv run ruff format --check .`
 - `uv run pyright`
-- `AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=user_assignments STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter uv run python infra/tests/dynamodb_e2e_tests.py`
+- `AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=user_assignments STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter PYTHONPATH=. uv run python infra/tests/dynamodb_e2e_tests.py` (from repo root)
 Expected outputs:
 - `ruff check`, `ruff format --check`, and `pyright` exit `0`
 - The AWS smoke script prints a clear success line after the concurrent increment assertion passes
@@ -350,7 +350,7 @@ Coordinator review checklist:
 - Run `terraform -chdir=infra plan` and confirm the diff contains the two expected DynamoDB tables.
 - Apply the infra with the exact environment/account intended for smoke testing.
 - Confirm [docs/runbook/DEPLOY_INFRA.md](/Users/mark/Documents/work/worktree_study_participant_assignment_interface/docs/runbook/DEPLOY_INFRA.md) includes AWS CLI install/setup, Terraform commands, and AWS console checks.
-- Run `AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=<output table name> STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=<output table name> uv run python infra/tests/dynamodb_e2e_tests.py` and confirm the script reports successful read/write and concurrent counter increment checks.
+- Run `AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=<output table name> STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=<output table name> PYTHONPATH=. uv run python infra/tests/dynamodb_e2e_tests.py` from the repo root and confirm the script reports successful read/write and concurrent counter increment checks.
 - Open the AWS console and spot-check that the test rows were created with the expected keys and counter values.
 
 ## Final Verification
@@ -359,6 +359,14 @@ Coordinator review checklist:
 2. Terraform validation and plan must pass.
 3. Real AWS smoke verification must prove that concurrent increments for one `(study_id, study_iteration_id, study_unique_assignment_key)` produce distinct sequential results.
 4. The final PR description should explicitly call out the frozen contracts PR 4 can now depend on: payload shape, key serialization, and 1-based counter behavior.
+5. The final PR description should document the smoke test using **`PYTHONPATH=.`** and **`uv run python infra/tests/dynamodb_e2e_tests.py`** from the repository root, for example:
+
+   ```bash
+   AWS_REGION=us-east-2 \
+   USER_ASSIGNMENTS_TABLE_NAME="<terraform output>" \
+   STUDY_ASSIGNMENT_COUNTER_TABLE_NAME="<terraform output>" \
+   PYTHONPATH=. uv run python infra/tests/dynamodb_e2e_tests.py
+   ```
 
 ## Alternative Approaches
 

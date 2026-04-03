@@ -197,11 +197,13 @@ terraform -chdir=infra output study_assignment_counter_table_name
 
 Run the end-to-end DynamoDB smoke test after Terraform finishes successfully.
 
+Run these commands from the **repository root** so `import lib` resolves. `PYTHONPATH=.` puts the project root on `sys.path` (running `infra/tests/dynamodb_e2e_tests.py` alone does not).
+
 ```bash
 AWS_REGION=us-east-2 \
 USER_ASSIGNMENTS_TABLE_NAME="$(terraform -chdir=infra output -raw user_assignments_table_name)" \
 STUDY_ASSIGNMENT_COUNTER_TABLE_NAME="$(terraform -chdir=infra output -raw study_assignment_counter_table_name)" \
-uv run python infra/tests/dynamodb_e2e_tests.py
+PYTHONPATH=. uv run python infra/tests/dynamodb_e2e_tests.py
 ```
 
 Expected behavior:
