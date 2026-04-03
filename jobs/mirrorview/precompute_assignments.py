@@ -234,19 +234,19 @@ def generate_and_export_precomputed_assignments(
     input_posts: pd.DataFrame, political_party: str, condition: str
 ) -> None:
     """Build assignment rows for one party/condition cell and write assignments.csv."""
-    base = generate_precomputed_assignments(input_posts)
+    precomputed_assignments = generate_precomputed_assignments(input_posts)
     created_at = get_current_timestamp()
-    n = len(base)
-    sampled_assignments = pd.DataFrame(
+    n = len(precomputed_assignments)
+    exportable_assignments = pd.DataFrame(
         {
             "id": [f"{political_party}-{condition}-{i + 1:04d}" for i in range(n)],
-            "assigned_post_ids": base["assigned_post_ids"],
+            "assigned_post_ids": precomputed_assignments["assigned_post_ids"],
             "condition": condition,
             "created_at": created_at,
         }
     )
     write_assignments(
-        assignments=sampled_assignments, political_party=political_party, condition=condition
+        assignments=exportable_assignments, political_party=political_party, condition=condition
     )
 
 
