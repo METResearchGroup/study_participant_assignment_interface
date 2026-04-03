@@ -5,7 +5,7 @@ from typing import Any
 
 import boto3
 
-DEFAULT_REGION_NAME = "us-central-2"
+DEFAULT_REGION_NAME = "us-east-2"
 
 
 class S3:
