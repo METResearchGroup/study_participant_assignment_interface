@@ -178,6 +178,4 @@ def increment_assignment_counter(
     counter = attributes.get("counter")
     if counter is None:
         raise RuntimeError("DynamoDB update did not return a counter value.")
-    if isinstance(counter, Decimal):
-        return int(counter)
     return int(counter)
