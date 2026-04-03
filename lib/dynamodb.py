@@ -35,14 +35,31 @@ class StudyAssignmentCounterRecord(BaseModel):
     last_updated_at: str
 
 
+_COMPOSITE_KEY_SEP = "#"
+
+
+def _assert_component_has_no_composite_sep(name: str, value: str) -> None:
+    if _COMPOSITE_KEY_SEP in value:
+        raise ValueError(
+            f"{name} must not contain {_COMPOSITE_KEY_SEP!r} "
+            f"(ambiguous composite key); got {value!r}"
+        )
+
+
 def _build_iteration_user_key(study_iteration_id: str, user_id: str) -> str:
-    return f"{study_iteration_id}#{user_id}"
+    _assert_component_has_no_composite_sep("study_iteration_id", study_iteration_id)
+    _assert_component_has_no_composite_sep("user_id", user_id)
+    return f"{study_iteration_id}{_COMPOSITE_KEY_SEP}{user_id}"
 
 
 def _build_iteration_assignment_key(
     study_iteration_id: str, study_unique_assignment_key: str
 ) -> str:
-    return f"{study_iteration_id}#{study_unique_assignment_key}"
+    _assert_component_has_no_composite_sep("study_iteration_id", study_iteration_id)
+    _assert_component_has_no_composite_sep(
+        "study_unique_assignment_key", study_unique_assignment_key
+    )
+    return f"{study_iteration_id}{_COMPOSITE_KEY_SEP}{study_unique_assignment_key}"
 
 
 def _get_table(table_name: str, region_name: str | None = None):
