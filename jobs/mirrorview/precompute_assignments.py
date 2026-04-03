@@ -241,6 +241,7 @@ def generate_and_export_precomputed_assignments(
         {
             "id": [f"{political_party}-{condition}-{i + 1:04d}" for i in range(n)],
             "assigned_post_ids": precomputed_assignments["assigned_post_ids"],
+            "political_party": political_party,
             "condition": condition,
             "created_at": created_at,
         }
@@ -253,13 +254,13 @@ def generate_and_export_precomputed_assignments(
 def generate_and_export_all_precomputed_assignments(input_posts: pd.DataFrame) -> None:
     """Export precomputed assignments for each political party and study condition.
 
-    Writes one assignments.csv per (POLITICAL_PARTIES × STUDY_CONDITIONS) cell.
+    Writes one assignments.csv per (POLITICAL_PARTIES x STUDY_CONDITIONS) cell.
     """
     for political_party in POLITICAL_PARTIES:
         for condition in STUDY_CONDITIONS:
             print(
                 f"Generating precomputed assignments: political_party={political_party!r}, "
-                f"condition={condition!r} …"
+                f"condition={condition!r}"
             )
             generate_and_export_precomputed_assignments(
                 input_posts=input_posts, political_party=political_party, condition=condition

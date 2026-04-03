@@ -261,6 +261,7 @@ class TestWriteAssignments:
             {
                 "id": ["democrat-control-0001"],
                 "assigned_post_ids": [json.dumps(["a", "b"])],
+                "political_party": ["democrat"],
                 "condition": ["control"],
                 "created_at": ["ts"],
             }
@@ -270,7 +271,7 @@ class TestWriteAssignments:
         csv_path = out_root / "democrat" / "control" / pa.OUTPUT_RECORDS_FILENAME
         assert csv_path.is_file()
         loaded = pd.read_csv(csv_path)
-        expected_cols = {"id", "assigned_post_ids", "condition", "created_at"}
+        expected_cols = {"id", "assigned_post_ids", "political_party", "condition", "created_at"}
         assert set(loaded.columns) == expected_cols
 
     def test_creates_parent_directories(self, tmp_path):
@@ -280,6 +281,7 @@ class TestWriteAssignments:
             {
                 "id": ["x"],
                 "assigned_post_ids": [json.dumps([])],
+                "political_party": ["republican"],
                 "condition": ["control"],
                 "created_at": ["t"],
             }
@@ -312,6 +314,7 @@ class TestGenerateAndExportPrecomputedAssignments:
         assignments = call_kw["assignments"]
         expected_ids = ["democrat-control-0001", "democrat-control-0002"]
         assert assignments["id"].tolist() == expected_ids
+        assert assignments["political_party"].tolist() == ["democrat", "democrat"]
         assert assignments["condition"].tolist() == ["control", "control"]
         assert assignments["created_at"].tolist() == ["fixed_ts", "fixed_ts"]
         assert mock_write.call_args.kwargs["political_party"] == "democrat"

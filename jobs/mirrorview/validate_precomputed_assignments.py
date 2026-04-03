@@ -25,7 +25,13 @@ if str(Path(__file__).resolve().parents[2]) not in sys.path:
 import jobs.mirrorview.precompute_assignments as pre
 from lib.constants import ROOT_DIR
 
-_EXPECTED_ASSIGNMENT_COLUMNS = ("id", "assigned_post_ids", "condition", "created_at")
+_EXPECTED_ASSIGNMENT_COLUMNS = (
+    "id",
+    "assigned_post_ids",
+    "political_party",
+    "condition",
+    "created_at",
+)
 
 
 def _infer_oversample_left(left_n: int, right_n: int) -> bool:
@@ -90,6 +96,11 @@ def validate_series_root(series_root: Path) -> None:
                     raise AssertionError(
                         f"{context}: column 'condition' is {row['condition']!r}, "
                         f"expected {condition!r} (from path {political_party}/{condition})"
+                    )
+                if row["political_party"] != political_party:
+                    raise AssertionError(
+                        f"{context}: column 'political_party' is {row['political_party']!r}, "
+                        f"expected {political_party!r} (from path {political_party}/{condition})"
                     )
                 raw_post_ids = row["assigned_post_ids"]
                 post_ids = json.loads(str(raw_post_ids))
