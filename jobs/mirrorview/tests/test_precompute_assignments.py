@@ -76,6 +76,21 @@ def _oversample_right_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _infer_oversample_left_from_counts(result: pd.DataFrame) -> bool:
+    counts = result.groupby("stance_toxicity_key", observed=True).size()
+    counts_by_key: dict[str, int] = counts.to_dict()
+    left_high = counts_by_key.get("left__sample_high_toxicity", 0)
+    right_high = counts_by_key.get("right__sample_high_toxicity", 0)
+    if left_high == 3 and right_high == 2:
+        return True
+    if left_high == 2 and right_high == 3:
+        return False
+    raise AssertionError(
+        "Unexpected high-toxicity split; expected left/right of 3/2 or 2/3, "
+        f"got {left_high}/{right_high}"
+    )
+
+
 class TestValidateAssignmentInvariants:
     """Tests for _validate_assignment_invariants function."""
 
@@ -137,7 +152,8 @@ class TestGenerateOneAssignment:
         """Sampled bundle has 20 rows and satisfies invariants for the returned flag."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result, oversample_left = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits)
+        oversample_left = _infer_oversample_left_from_counts(result)
         assert len(result) == 20
         pa._validate_assignment_invariants(result, oversample_left)
 
@@ -145,7 +161,7 @@ class TestGenerateOneAssignment:
         """Per-bucket stance_toxicity_key counts follow low/mid/high draws."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result, oversample_left = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits)
         counts = result.groupby("stance_toxicity_key", observed=True).size()
         for key in pa.POST_CATEGORIES:
             assert key in counts.index
@@ -153,7 +169,7 @@ class TestGenerateOneAssignment:
         assert counts["right__sample_low_toxicity"] == 2
         assert counts["left__sample_middle_toxicity"] == 5
         assert counts["right__sample_middle_toxicity"] == 5
-        if oversample_left:
+        if _infer_oversample_left_from_counts(result):
             assert counts["left__sample_high_toxicity"] == 3
             assert counts["right__sample_high_toxicity"] == 2
         else:
@@ -171,7 +187,7 @@ class TestGenerateOneAssignment:
         """A bundle never contains the same post_primary_key twice."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result, _ = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits)
         keys = result["post_primary_key"].tolist()
         assert len(keys) == len(set(keys))
 
@@ -228,7 +244,10 @@ class TestGeneratePrecomputedAssignments:
         splits = pa.split_input_posts_by_stance_toxicity(posts)
         pa.RNG = np.random.default_rng(pa.RANDOM_SEED)
         n = 400
-        n_left = sum(pa._generate_one_assignment(splits)[1] for _ in range(n))
+        n_left = sum(
+            _infer_oversample_left_from_counts(pa._generate_one_assignment(splits))
+            for _ in range(n)
+        )
         assert 120 < n_left < 280
 
 

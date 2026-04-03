@@ -139,12 +139,11 @@ def split_input_posts_by_stance_toxicity(
     }
 
 
-def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, bool]:
+def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Sample one valid 20-post bundle from pre-split stance/toxicity pools.
 
     Draws counts per the MirrorView spec (low/middle/high and left/right splits),
-    shuffles row order, validates invariants, and returns the combined frame plus
-    whether the high-toxicity split favored the left bucket.
+    shuffles row order, validates invariants, and returns the combined frame.
     """
     oversample_left = RNG.random() < 0.5
     high_left_n = 3 if oversample_left else 2
@@ -168,7 +167,7 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
     # validate invariants
     _validate_assignment_invariants(combined, oversample_left)
 
-    return combined, oversample_left
+    return combined
 
 
 def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
@@ -224,7 +223,7 @@ def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
     for i in range(TOTAL_RECORDS_TO_CREATE):
         if i % 100 == 0:
             print(f"Generated {i:04d}/{TOTAL_RECORDS_TO_CREATE:04d} assignments.")
-        sampled, _ = _generate_one_assignment(splits)
+        sampled = _generate_one_assignment(splits)
         post_ids = [str(primary_key) for primary_key in sampled["post_primary_key"].tolist()]
         assigned_post_ids.append(json.dumps(post_ids))
 
