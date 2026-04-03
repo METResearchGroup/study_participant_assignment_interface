@@ -25,7 +25,7 @@ LOCAL_DATA_PREFIX = ROOT_DIR / "data" / "mirrorview"
 
 def _iter_files(batch_root: Path) -> list[Path]:
     files = sorted(p for p in batch_root.rglob("*") if p.is_file())
-    return [p for p in files if ".csv" in p.name]
+    return [p for p in files if p.suffix.lower() == ".csv"]
 
 
 def _validate_local_path(local_path: Path) -> None:
