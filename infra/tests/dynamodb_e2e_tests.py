@@ -7,6 +7,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+TEST_ENV_PREFIX = "dev"
+
 
 def _require_env(name: str) -> str:
     value = os.getenv(name)
@@ -41,7 +43,7 @@ def main() -> None:
     assignment_counter_table = _require_env("STUDY_ASSIGNMENT_COUNTER_TABLE_NAME")
 
     study_id = f"study-{_unique_suffix()}"
-    study_iteration_id = f"iteration-{_unique_suffix()}"
+    study_iteration_id = f"{TEST_ENV_PREFIX}_iteration-{_unique_suffix()}"
     user_id = f"user-{_unique_suffix()}"
 
     payload_data = {
