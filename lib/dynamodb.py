@@ -76,7 +76,8 @@ def get_user_assignment(
         Key={
             "study_id": study_id,
             "iteration_user_key": iteration_user_key,
-        }
+        },
+        ConsistentRead=True,
     )
     item = response.get("Item")
     if not item:
