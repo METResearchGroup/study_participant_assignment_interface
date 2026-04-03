@@ -47,6 +47,11 @@ POST_CATEGORIES = [
 ]
 POLITICAL_PARTIES = ["democrat", "republican"]
 STUDY_CONDITIONS = ["control", "training_assisted"]
+
+# Single generator for the whole batch run so draws are reproducible for a given seed.
+RANDOM_SEED = 42
+RNG = np.random.default_rng(RANDOM_SEED)
+
 TOTAL_POSTS_TO_ASSIGN = 20
 TOTAL_LOW_TOXICITY_POSTS = 5
 TOTAL_HIGH_TOXICITY_POSTS = 5
@@ -119,8 +124,7 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
     shuffles row order, validates invariants, and returns the combined frame plus
     whether the high-toxicity split favored the left bucket.
     """
-    rng = np.random.default_rng()
-    oversample_left = bool(rng.integers(0, 2))
+    oversample_left = bool(RNG.integers(0, 2))
     high_left_n = 3 if oversample_left else 2
     high_right_n = 2 if oversample_left else 3
 
@@ -128,7 +132,7 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
         if len(df) < n:
             msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
             raise ValueError(msg)
-        return df.sample(n=n, random_state=rng).reset_index(drop=True)
+        return df.sample(n=n, random_state=RNG).reset_index(drop=True)
 
     parts = [
         sample_n_or_raise(splits["left__sample_low_toxicity"], 3),
@@ -139,7 +143,7 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
         sample_n_or_raise(splits["right__sample_high_toxicity"], high_right_n),
     ]
     combined = pd.concat(parts, ignore_index=True)
-    perm = rng.permutation(len(combined))
+    perm = RNG.permutation(len(combined))
     combined = combined.iloc[perm].reset_index(drop=True)
     _validate_assignment_invariants(combined, oversample_left)
     return combined, oversample_left
