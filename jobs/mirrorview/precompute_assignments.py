@@ -133,7 +133,7 @@ def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFr
     shuffles row order, validates invariants, and returns the combined frame plus
     whether the high-toxicity split favored the left bucket.
     """
-    oversample_left = bool(RNG.integers(0, 2))
+    oversample_left = RNG.random() < 0.5
     high_left_n = 3 if oversample_left else 2
     high_right_n = 2 if oversample_left else 3
 
@@ -200,6 +200,10 @@ def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
     operation on an average of N//d rows. This eliminates the while-loop and
     makes sampling more consistent and well defined and removes the invariant
     checks required from a naive while-loop.
+
+    It's OK to sample with replacement. It'll be a pain to make sure that we
+    implement sampling without replacement, and since we include randomness,
+    then in expectation this'll lead to a balanced representation.
     """
     if "stance_toxicity_key" not in input_posts.columns:
         raise ValueError("input_posts must include a 'stance_toxicity_key' column")
