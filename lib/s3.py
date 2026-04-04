@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import boto3
+import pandas as pd
 
 DEFAULT_REGION_NAME = "us-east-2"
 
@@ -55,3 +57,23 @@ class S3:
         key = key.lstrip("/")
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         return response["Body"].read()
+
+    def list_keys_ordered(self, prefix: str) -> list[str]:
+        """List object keys for a prefix in ascending lexical order."""
+        normalized_prefix = prefix.lstrip("/")
+        paginator = self._client.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=self._bucket, Prefix=normalized_prefix)
+
+        keys: list[str] = []
+        for page in pages:
+            for item in page.get("Contents", []):
+                key = item.get("Key")
+                if key:
+                    keys.append(key)
+
+        return sorted(keys)
+
+    def load_csv_to_dataframe(self, key: str) -> pd.DataFrame:
+        """Load a CSV object from S3 into a pandas DataFrame."""
+        csv_bytes = self.get_bytes(key)
+        return pd.read_csv(BytesIO(csv_bytes))
