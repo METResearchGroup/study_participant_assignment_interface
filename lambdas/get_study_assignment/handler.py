@@ -2,23 +2,28 @@ import json
 
 import pandas as pd
 
-from lib.dynamodb import (
-    UserAssignmentPayload,
-    UserAssignmentRecord,
-    get_user_assignment,
-    put_user_assignment,
-)
-from lib.s3 import S3
-
 from jobs.mirrorview.constants import (
     DEFAULT_BUCKET,
     DEFAULT_S3_PREFIX,
     OUTPUT_RECORDS_FILENAME,
 )
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
+from lib.dynamodb import (
+    AssignmentCounterConflictError,
+    UserAssignmentPayload,
+    UserAssignmentRecord,
+    compare_and_increment_assignment_counter,
+    get_user_assignment,
+    list_assignment_counters_for_party,
+    put_user_assignment,
+)
+from lib.s3 import S3
 
 user_assignments_table_name = "user_assignments"
+study_assignment_counter_table_name = "study_assignment_counter"
 region_name = "us-east-2"
+MAX_ASSIGNMENT_RETRIES = 5
+DEFAULT_STUDY_CONDITIONS = ("control", "training_assisted")
 
 s3 = S3(bucket=DEFAULT_BUCKET)
 
@@ -41,18 +46,85 @@ def get_user_assignment_record_if_exists(
 
 # basically, we (1) iterate the DynamoDB counter, and then (2) we
 # determine the assignment ID.
-def assign_user_to_condition(prolific_id: str, political_party: str) -> dict:
-    condition = ""
-    total_in_condition = 0  # includes this new user
+def assign_user_to_condition(
+    *,
+    study_id: str,
+    study_iteration_id: str,
+    political_party: str,
+) -> dict:
+    """We assign a user to a condition based on which condition has the least
+    number of users assigned to it, for the given political party.
 
-    return {"condition": condition, "total_in_condition": total_in_condition}
+    We need to, at some level, (1) read the counts and (2) update accordingly.
+    This current approach is the easiest for that. We read the counts and
+    then attempt to increment the counter, assuming that it hasn't changed
+    counts (i.e., another lambda hasn't already incremented it for a different
+    user). If this fails, we retry, up to MAX_ASSIGNMENT_RETRIES times.
+
+    This concurrency pattern is straightforward to implement and for our
+    (very small) use case, it should be sufficient. After all, for 1,000-2,000
+    users, this TOCTOU race condition is very unlikely anyways, but we want it
+    here in case it indeed does happen.
+    """
+    for _ in range(MAX_ASSIGNMENT_RETRIES):
+        existing_records = list_assignment_counters_for_party(
+            study_id=study_id,
+            study_iteration_id=study_iteration_id,
+            political_party=political_party,
+            table_name=study_assignment_counter_table_name,
+            region_name=region_name,
+        )
+        key_to_counter: dict[str, int] = {
+            record.study_unique_assignment_key: int(record.counter) for record in existing_records
+        }
+        key_to_counter = {
+            key: counter
+            for key, counter in key_to_counter.items()
+            if key.startswith(f"{political_party}:") and ":" in key
+        }
+        all_candidate_keys: list[str] = sorted(
+            set(key_to_counter.keys())
+            | {f"{political_party}:{condition}" for condition in DEFAULT_STUDY_CONDITIONS}
+        )
+        if not all_candidate_keys:
+            raise ValueError(
+                f"No candidate assignment keys for political_party={political_party!r}"
+            )
+
+        # Choose the currently smallest cell; tie-break by key for determinism.
+        selected_unique_key = min(
+            all_candidate_keys,
+            key=lambda key: (key_to_counter.get(key, 0), key),
+        )
+        expected_counter = key_to_counter.get(selected_unique_key, 0)
+        try:
+            total_in_condition = compare_and_increment_assignment_counter(
+                study_id=study_id,
+                study_iteration_id=study_iteration_id,
+                study_unique_assignment_key=selected_unique_key,
+                expected_counter=expected_counter,
+                table_name=study_assignment_counter_table_name,
+                region_name=region_name,
+            )
+        except AssignmentCounterConflictError:
+            continue
+
+        condition = selected_unique_key.split(":", 1)[1]
+        return {"condition": condition, "total_in_condition": total_in_condition}
+
+    raise RuntimeError(
+        f"Failed to assign user after {MAX_ASSIGNMENT_RETRIES} retries for "
+        f"study_id={study_id!r}, study_iteration_id={study_iteration_id!r}, "
+        f"political_party={political_party!r}"
+    )
 
 
 def get_latest_uploaded_precomputed_assignments_s3_key(
     political_party: str,
     condition: str,
 ) -> str:
-    """Return the latest uploaded precomputed assignments S3 key for a given political party and condition."""
+    """Return the latest uploaded precomputed assignments S3 key for a
+    given political party and condition."""
     precomputed_keys: list[str] = s3.list_keys_ordered(prefix=DEFAULT_S3_PREFIX)
     relevant_precomputed_keys: list[str] = [
         key
@@ -78,15 +150,20 @@ def set_user_assignment_record(
     1.
     """
     assigned_condition_dict: dict = assign_user_to_condition(
-        prolific_id=prolific_id, political_party=political_party
+        study_id=study_id,
+        study_iteration_id=study_iteration_id,
+        political_party=political_party,
     )
     assigned_condition = assigned_condition_dict["condition"]
     total_in_condition = assigned_condition_dict["total_in_condition"]
+    if total_in_condition <= 0:
+        raise ValueError(f"Invalid counter for assignment generation: {total_in_condition!r}")
 
     assignment_id: str = generate_single_assignment_id(
         political_party=political_party,
         condition=assigned_condition,
-        index=total_in_condition,
+        # DynamoDB counters are 1-based after increment; assignment IDs are 0-based.
+        index=total_in_condition - 1,
     )
     metadata: dict[str, str] = {
         "political_party": political_party,
@@ -100,7 +177,7 @@ def set_user_assignment_record(
         "s3_bucket": DEFAULT_BUCKET,
         "s3_key": s3_key,
         "assignment_id": assignment_id,
-        "metadata": metadata,
+        "metadata": json.dumps(metadata),
     }
     payload = UserAssignmentPayload(**raw_payload_dict)
 
@@ -136,7 +213,7 @@ def get_or_set_user_assignment_record(
 
 
 def load_latest_precomputed_assignments(s3_key: str) -> pd.DataFrame:
-    return pd.DataFrame()  # TODO: implement
+    return s3.load_csv_to_dataframe(key=s3_key)
 
 
 def get_precomputed_assignment(
@@ -150,8 +227,15 @@ def get_precomputed_assignment(
     ]
     if assignment.empty:
         raise ValueError(f"Assignment not found for user {user_assignment_record.user_id}")
-    assigned_post_ids: list[str] = assignment["assigned_post_ids"].tolist()
-    return assigned_post_ids
+    assigned_post_ids_raw = assignment.iloc[0]["assigned_post_ids"]
+    if isinstance(assigned_post_ids_raw, str):
+        return json.loads(assigned_post_ids_raw)
+    if isinstance(assigned_post_ids_raw, list):
+        return assigned_post_ids_raw
+    raise ValueError(
+        f"Unexpected assigned_post_ids format: {type(assigned_post_ids_raw)!r} "
+        f"for user {user_assignment_record.user_id!r}"
+    )
 
 
 def main(study_id: str, study_iteration_id: str, prolific_id: str, political_party: str):

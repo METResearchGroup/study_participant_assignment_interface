@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 from pydantic import BaseModel
 
 from lib.timestamp_utils import get_current_timestamp
@@ -33,6 +35,10 @@ class StudyAssignmentCounterRecord(BaseModel):
     counter: int
     created_at: str
     last_updated_at: str
+
+
+class AssignmentCounterConflictError(RuntimeError):
+    """Raised when a compare-and-increment counter update loses a race."""
 
 
 _COMPOSITE_KEY_SEP = "#"
@@ -197,4 +203,109 @@ def increment_assignment_counter(
     counter = attributes.get("counter")
     if counter is None:
         raise RuntimeError("DynamoDB update did not return a counter value.")
+    return int(counter)
+
+
+def list_assignment_counters_for_party(
+    *,
+    study_id: str,
+    study_iteration_id: str,
+    political_party: str,
+    table_name: str,
+    region_name: str | None = None,
+) -> list[StudyAssignmentCounterRecord]:
+    """List counter rows for one (study, iteration, political_party)."""
+    table = _get_table(table_name, region_name=region_name)
+    iteration_party_prefix = _build_iteration_assignment_key(
+        study_iteration_id, f"{political_party}:"
+    )
+    response = table.query(
+        KeyConditionExpression=Key("study_id").eq(study_id)
+        & Key("iteration_assignment_key").begins_with(iteration_party_prefix),
+        ConsistentRead=True,
+    )
+    items = response.get("Items", [])
+    records: list[StudyAssignmentCounterRecord] = []
+    for item in items:
+        iteration_assignment_key = item["iteration_assignment_key"]
+        unique_assignment_key = item.get(
+            "study_unique_assignment_key",
+            iteration_assignment_key.split(_COMPOSITE_KEY_SEP, 1)[1],
+        )
+        records.append(
+            StudyAssignmentCounterRecord(
+                study_id=item["study_id"],
+                study_iteration_id=item.get("study_iteration_id", study_iteration_id),
+                study_unique_assignment_key=unique_assignment_key,
+                iteration_assignment_key=iteration_assignment_key,
+                counter=int(item.get("counter", 0)),
+                created_at=item.get("created_at", ""),
+                last_updated_at=item.get("last_updated_at", ""),
+            )
+        )
+    return records
+
+
+def compare_and_increment_assignment_counter(
+    *,
+    study_id: str,
+    study_iteration_id: str,
+    study_unique_assignment_key: str,
+    expected_counter: int,
+    table_name: str,
+    region_name: str | None = None,
+) -> int:
+    """Compare-and-increment a counter row. Raises on compare mismatch."""
+    table = _get_table(table_name, region_name=region_name)
+    iteration_assignment_key = _build_iteration_assignment_key(
+        study_iteration_id, study_unique_assignment_key
+    )
+    timestamp = get_current_timestamp()
+    try:
+        response = table.update_item(
+            Key={
+                "study_id": study_id,
+                "iteration_assignment_key": iteration_assignment_key,
+            },
+            ConditionExpression=(
+                "(attribute_not_exists(#counter) AND :expected_counter = :zero) "
+                "OR #counter = :expected_counter"
+            ),
+            UpdateExpression=(
+                "SET #counter = if_not_exists(#counter, :zero) + :one, "
+                "#updated_at = :timestamp, "
+                "#created_at = if_not_exists(#created_at, :timestamp), "
+                "#study_iteration_id = if_not_exists(#study_iteration_id, :study_iteration_id), "
+                "#study_unique_assignment_key = if_not_exists("
+                "#study_unique_assignment_key, :study_unique_assignment_key)"
+            ),
+            ExpressionAttributeNames={
+                "#counter": "counter",
+                "#created_at": "created_at",
+                "#updated_at": "last_updated_at",
+                "#study_iteration_id": "study_iteration_id",
+                "#study_unique_assignment_key": "study_unique_assignment_key",
+            },
+            ExpressionAttributeValues={
+                ":expected_counter": expected_counter,
+                ":zero": 0,
+                ":one": 1,
+                ":timestamp": timestamp,
+                ":study_iteration_id": study_iteration_id,
+                ":study_unique_assignment_key": study_unique_assignment_key,
+            },
+            ReturnValues="UPDATED_NEW",
+        )
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code == "ConditionalCheckFailedException":
+            raise AssignmentCounterConflictError(
+                "Counter changed before compare-and-increment completed."
+            ) from exc
+        raise
+
+    attributes = response.get("Attributes", {})
+    counter = attributes.get("counter")
+    if counter is None:
+        raise RuntimeError("DynamoDB compare-and-increment did not return a counter value.")
     return int(counter)
