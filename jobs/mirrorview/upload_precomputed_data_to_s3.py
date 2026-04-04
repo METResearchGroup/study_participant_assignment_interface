@@ -15,12 +15,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from lib.constants import ROOT_DIR
+from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, LOCAL_DATA_PREFIX
 from lib.s3 import S3
-
-DEFAULT_BUCKET = "jspsych-mirror-view-3"
-DEFAULT_S3_PREFIX = "precomputed_assignments"
-LOCAL_DATA_PREFIX = ROOT_DIR / "data" / "mirrorview"
 
 
 def _iter_files(batch_root: Path) -> list[Path]:

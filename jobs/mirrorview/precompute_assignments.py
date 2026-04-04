@@ -32,8 +32,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+from jobs.mirrorview.constants import LOCAL_DATA_PREFIX
 from jobs.mirrorview.generate_assignment_ids import generate_assignment_ids
-from lib.constants import ROOT_DIR
 from lib.timestamp_utils import get_current_timestamp
 
 STANCES = ["left", "right"]
@@ -69,7 +69,7 @@ INPUT_POSTS_PATH = CURRENT_DIR / INPUT_POSTS_FILENAME
 
 TOTAL_RECORDS_TO_CREATE = 1000
 OUTPUT_RECORDS_FILENAME = "assignments.csv"
-OUTPUT_RECORDS_ROOT_PREFIX = ROOT_DIR / "data" / "mirrorview" / get_current_timestamp()
+OUTPUT_RECORDS_ROOT_PREFIX = LOCAL_DATA_PREFIX / get_current_timestamp()
 
 
 def load_input_posts() -> pd.DataFrame:
