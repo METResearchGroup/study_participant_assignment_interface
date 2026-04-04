@@ -32,6 +32,7 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+from jobs.mirrorview.generate_assignment_ids import generate_assignment_ids
 from lib.constants import ROOT_DIR
 from lib.timestamp_utils import get_current_timestamp
 
@@ -239,7 +240,7 @@ def generate_and_export_precomputed_assignments(
     n = len(precomputed_assignments)
     exportable_assignments = pd.DataFrame(
         {
-            "id": [f"{political_party}-{condition}-{i + 1:04d}" for i in range(n)],
+            "id": generate_assignment_ids(political_party, condition, n),
             "assigned_post_ids": precomputed_assignments["assigned_post_ids"],
             "political_party": political_party,
             "condition": condition,
