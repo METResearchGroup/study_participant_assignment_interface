@@ -9,7 +9,6 @@ Run:
 from __future__ import annotations
 
 import json
-import traceback
 import uuid
 from collections.abc import Iterable
 from typing import Any
@@ -22,10 +21,11 @@ import lambdas.get_study_assignment.handler as h
 from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lib.s3 import S3
-from lib.testing_utils import _assert_equal, _assert_true, _require_env
+from lib.smoke_testing_utils import run_smoke_tests
+from lib.testing_utils import _assert_equal, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
-TEST_ENV_PREFIX = "smoke"
+TEST_ENV_PREFIX = "local-smoke"
 
 
 class HandlerSmokeTestBase:
@@ -172,27 +172,47 @@ class HandlerSmokeTestBase:
 
 class TestHandlerSmoke(HandlerSmokeTestBase):
     def test_new_user_happy_path(self) -> None:
+        """End-to-end path for a **new participant** with no prior user assignment row."""
         self._seed_party_condition_fixtures("democrat")
         event = self._make_event(prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat")
 
         response = h.handler(event, None)
 
-        _assert_true(
-            isinstance(response["assigned_post_ids"], list), "assigned_post_ids must be list"
-        )
-        _assert_true(len(response["assigned_post_ids"]) > 0, "assigned_post_ids must be non-empty")
-        _assert_equal(response["already_assigned"], True, "already_assigned must be True")
-        _assert_true(
-            response["condition"] in {"control", "training_assisted"},
-            "condition must be one of default conditions",
+        # Matches `_seed_precomputed_csv`: first new democrat user lands on `control` (tie-break),
+        # counter 1 → assignment id `democrat-control-0001` → CSV row index 1.
+        expected_response = {
+            "assigned_post_ids": [
+                "democrat-control-post-1-a",
+                "democrat-control-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "control",
+        }
+        _assert_equal(
+            response,
+            expected_response,
+            "handler response should match seeded democrat/control row for assignment index 1",
         )
 
         assignments = self._query_user_assignments_for_iteration()
         _assert_equal(len(assignments), 1, "Exactly one user assignment row should exist")
 
     def test_existing_user_idempotency(self) -> None:
+        """**Returning participant** path: existing user assignment must not be
+        recreated or reassigned.
+        """
         self._seed_party_condition_fixtures("democrat")
         event = self._make_event(prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat")
+
+        expected_response = {
+            "assigned_post_ids": [
+                "democrat-control-post-1-a",
+                "democrat-control-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "control",
+        }
+        expected_counters = {"democrat:control": 1}
 
         first_response = h.handler(event, None)
         counters_after_first = {
@@ -207,10 +227,24 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
         }
 
         _assert_equal(
-            second_response, first_response, "Second response should equal first response"
+            first_response,
+            expected_response,
+            "first handler response should match seeded democrat/control row for assignment index 1",  # noqa
         )
         _assert_equal(
-            counters_after_second, counters_after_first, "Counters changed on repeat request"
+            second_response,
+            expected_response,
+            "second handler response should match first (idempotent)",
+        )
+        _assert_equal(
+            counters_after_first,
+            expected_counters,
+            "counters after first call should reflect a single democrat control assignment",
+        )
+        _assert_equal(
+            counters_after_second,
+            expected_counters,
+            "counters after second call should be unchanged",
         )
         assignments = self._query_user_assignments_for_iteration()
         _assert_equal(
@@ -218,6 +252,16 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
         )
 
     def test_balance_across_conditions_same_party(self) -> None:
+        """**Least-populated cell** selection for the same party across two new users.
+
+        The first time we run the handler (new democrat user, empty counters),
+        we expect `control` and the post IDs from the seeded democrat/control
+        CSV row for assignment index 1.
+
+        The second time we run the handler (another new democrat user), we expect
+        `training_assisted` and the post IDs from the seeded democrat/training_assisted
+        CSV row for assignment index 1, because `control` already received one assignment.
+        """
         self._seed_party_condition_fixtures("democrat")
         first_event = self._make_event(
             prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat"
@@ -226,18 +270,36 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
             prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat"
         )
 
+        expected_first_response = {
+            "assigned_post_ids": [
+                "democrat-control-post-1-a",
+                "democrat-control-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "control",
+        }
+        expected_second_response = {
+            "assigned_post_ids": [
+                "democrat-training_assisted-post-1-a",
+                "democrat-training_assisted-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "training_assisted",
+        }
+        expected_counters = {"democrat:control": 1, "democrat:training_assisted": 1}
+
         first_response = h.handler(first_event, None)
         second_response = h.handler(second_event, None)
 
         _assert_equal(
-            first_response["condition"],
-            "control",
-            "Tie-break should deterministically choose control first",
+            first_response,
+            expected_first_response,
+            "first user should get democrat control row for assignment index 1",
         )
         _assert_equal(
-            {first_response["condition"], second_response["condition"]},
-            {"control", "training_assisted"},
-            "Two users should distribute across both conditions",
+            second_response,
+            expected_second_response,
+            "second user should get democrat training_assisted row for assignment index 1",
         )
 
         counters = {
@@ -245,17 +307,23 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
             for row in self._query_counters_for_iteration()
         }
         _assert_equal(
-            counters.get("democrat:control"), 1, "Expected one democrat control assignment"
-        )
-        _assert_equal(
-            counters.get("democrat:training_assisted"),
-            1,
-            "Expected one democrat training_assisted assignment",
+            counters,
+            expected_counters,
+            "counters should show one assignment per democrat condition cell",
         )
 
     def test_party_isolation(self) -> None:
-        democrat_fixtures = self._seed_party_condition_fixtures("democrat")
-        republican_fixtures = self._seed_party_condition_fixtures("republican")
+        """**Party isolation**: democrat and republican assignments stay in separate namespaces.
+
+        The first time we run the handler (new democrat user), we expect `control` and the post IDs
+        from the seeded democrat/control CSV row for assignment index 1.
+
+        The second time we run the handler (new republican user, same study and iteration),
+        we expect `control` and the post IDs from the seeded republican/control CSV row
+        for assignment index 1, independent of the democrat user's assignment.
+        """
+        self._seed_party_condition_fixtures("democrat")
+        self._seed_party_condition_fixtures("republican")
 
         democrat_event = self._make_event(
             prolific_id=f"user-{uuid.uuid4().hex}",
@@ -266,101 +334,57 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
             political_party="republican",
         )
 
+        expected_democrat_response = {
+            "assigned_post_ids": [
+                "democrat-control-post-1-a",
+                "democrat-control-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "control",
+        }
+        expected_republican_response = {
+            "assigned_post_ids": [
+                "republican-control-post-1-a",
+                "republican-control-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "control",
+        }
+        expected_counters = {"democrat:control": 1, "republican:control": 1}
+
         democrat_response = h.handler(democrat_event, None)
         republican_response = h.handler(republican_event, None)
 
         _assert_equal(
-            democrat_response["condition"], "control", "First democrat assignment should be control"
+            democrat_response,
+            expected_democrat_response,
+            "democrat handler response should match seeded democrat/control row for assignment index 1",  # noqa
         )
         _assert_equal(
-            republican_response["condition"],
-            "control",
-            "First republican assignment should be control",
+            republican_response,
+            expected_republican_response,
+            "republican handler response should match seeded republican/control row for assignment index 1",  # noqa
         )
 
         assignments = self._query_user_assignments_for_iteration()
         _assert_equal(len(assignments), 2, "Expected exactly two user assignment rows")
 
-        assignment_payloads = [json.loads(item["payload"]) for item in assignments]
-        by_party = {}
-        for payload in assignment_payloads:
-            metadata = json.loads(payload["metadata"])
-            by_party[metadata["political_party"]] = payload
-
-        _assert_true("democrat" in by_party, "Democrat payload missing")
-        _assert_true("republican" in by_party, "Republican payload missing")
-
-        _assert_equal(
-            by_party["democrat"]["s3_key"],
-            democrat_fixtures["control"],
-            "Democrat should use democrat fixture key",
-        )
-        _assert_equal(
-            by_party["republican"]["s3_key"],
-            republican_fixtures["control"],
-            "Republican should use republican fixture key",
-        )
-        _assert_true(
-            by_party["democrat"]["assignment_id"].startswith("democrat-control-"),
-            "Democrat assignment id should stay in democrat namespace",
-        )
-        _assert_true(
-            by_party["republican"]["assignment_id"].startswith("republican-control-"),
-            "Republican assignment id should stay in republican namespace",
-        )
-
         counters = {
             row["study_unique_assignment_key"]: int(row["counter"])
             for row in self._query_counters_for_iteration()
         }
-        _assert_equal(counters.get("democrat:control"), 1, "Democrat counter should be isolated")
         _assert_equal(
-            counters.get("republican:control"), 1, "Republican counter should be isolated"
+            counters,
+            expected_counters,
+            "each party should have incremented only its own control cell once",
         )
 
 
 TEST_CLASSES = [TestHandlerSmoke]
 
 
-def _iter_test_methods(test_instance) -> list[str]:
-    methods = [
-        name
-        for name in dir(test_instance)
-        if name.startswith("test_") and callable(getattr(test_instance, name))
-    ]
-    return sorted(methods)
-
-
-def run_smoke_tests() -> int:
-    failed: set[str] = set()
-    total_methods = sum(len(_iter_test_methods(cls())) for cls in TEST_CLASSES)
-    for test_class in TEST_CLASSES:
-        test_instance = test_class()
-        for method_name in _iter_test_methods(test_instance):
-            test_label = f"{test_class.__name__}.{method_name}"
-            try:
-                test_instance.setup()
-                getattr(test_instance, method_name)()
-                print(f"PASS {test_label}")
-            except Exception as exc:
-                failed.add(test_label)
-                print(f"FAIL {test_label}: {exc}")
-                traceback.print_exc()
-            finally:
-                try:
-                    test_instance.teardown()
-                except Exception as exc:
-                    failed.add(test_label)
-                    print(f"FAIL {test_label} (teardown): {exc}")
-                    traceback.print_exc()
-
-    passed_count = total_methods - len(failed)
-    print(f"Summary: {passed_count} passed, {len(failed)} failed")
-    return 1 if failed else 0
-
-
 def main() -> None:
-    raise SystemExit(run_smoke_tests())
+    raise SystemExit(run_smoke_tests(TEST_CLASSES))
 
 
 if __name__ == "__main__":

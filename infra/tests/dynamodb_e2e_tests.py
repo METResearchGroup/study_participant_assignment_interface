@@ -9,7 +9,6 @@ Run:
 from __future__ import annotations
 
 import json
-import traceback
 import uuid
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +29,7 @@ from lib.dynamodb import (
     list_assignment_counters_for_party,
     put_user_assignment,
 )
+from lib.smoke_testing_utils import run_smoke_tests
 from lib.testing_utils import _assert_equal, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
@@ -384,55 +384,9 @@ TEST_CLASSES = [
 ]
 
 
-def _iter_test_methods(test_instance) -> list[str]:
-    """Return sorted test method names for a test instance."""
-    methods = [
-        name
-        for name in dir(test_instance)
-        if name.startswith("test_") and callable(getattr(test_instance, name))
-    ]
-    return sorted(methods)
-
-
-def run_smoke_tests() -> int:
-    """Run all smoke tests with setup/teardown and aggregated reporting.
-
-    Algorithm:
-    1. For each test class, instantiate it and discover `test_*` methods.
-    2. For each method, run `setup()` -> test method -> `teardown()` in a
-       try/finally block so cleanup runs even on failure.
-    3. Track failures by fully qualified name and print a summary.
-    """
-    failed: set[str] = set()
-    total_methods = sum(len(_iter_test_methods(cls())) for cls in TEST_CLASSES)
-    for test_class in TEST_CLASSES:
-        test_instance = test_class()
-        for method_name in _iter_test_methods(test_instance):
-            test_label = f"{test_class.__name__}.{method_name}"
-            try:
-                test_instance.setup()
-                getattr(test_instance, method_name)()
-                print(f"PASS {test_label}")
-            except Exception as exc:
-                failed.add(test_label)
-                print(f"FAIL {test_label}: {exc}")
-                traceback.print_exc()
-            finally:
-                try:
-                    test_instance.teardown()
-                except Exception as exc:
-                    failed.add(test_label)
-                    print(f"FAIL {test_label} (teardown): {exc}")
-                    traceback.print_exc()
-
-    passed_count = total_methods - len(failed)
-    print(f"Summary: {passed_count} passed, {len(failed)} failed")
-    return 1 if failed else 0
-
-
 def main() -> None:
     """Entry point for manual execution."""
-    raise SystemExit(run_smoke_tests())
+    raise SystemExit(run_smoke_tests(TEST_CLASSES))
 
 
 if __name__ == "__main__":
