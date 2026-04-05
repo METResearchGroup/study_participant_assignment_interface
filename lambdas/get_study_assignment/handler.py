@@ -190,6 +190,9 @@ def set_user_assignment_record(
         # counter, but this means that we'll never have a '-000' assignment ID
         # since we'll start with '-001'. This is OK, as we intentionally
         # overprovision. We should never run out of assignment IDs.
+        # If there were 10 users in the condition, then `assign_user_to_condition`
+        # will return total_in_condition=11 (which includes the current user)
+        # and our assignment ID will be '-011'.
         index=total_in_condition,
     )
     metadata: dict[str, str] = {
