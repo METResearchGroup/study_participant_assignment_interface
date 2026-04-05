@@ -1,6 +1,6 @@
 # get_study_assignment smoke tests
 
-End-to-end smoke tests for the Lambda handler. One shared suite (`handler_smoke_suite.py`) runs through `run_handler_smoke_tests.py`, which picks how the handler is invoked: in-process (`local`), Lambda Runtime Interface Emulator in Docker (`docker`), or (when enabled) deployed Lambda (`prod`).
+End-to-end smoke tests for the Lambda handler. One shared suite (`handler_smoke_suite.py`) runs through `run_handler_smoke_tests.py`, which picks how the handler is invoked: in-process (`local`), Lambda Runtime Interface Emulator in Docker (`docker`), or deployed Lambda via `lambda:InvokeFunction` (`prod`, gated by `SMOKE_ALLOW_PROD=true`).
 
 Run commands from the **repository root** with `PYTHONPATH=.` so `lambdas` and `lib` import correctly.
 
@@ -59,9 +59,18 @@ Use two terminals from the repo root. Replace `YOUR_AWS_PROFILE` with your profi
 
 ### Terminal 1 — build image and start Lambda RIE
 
-```bash
-docker build -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
+For **prod parity** with default x86_64 Lambda, build **linux/amd64** (on Apple Silicon this may use QEMU and be slower):
 
+```bash
+docker buildx build --platform linux/amd64 --load \
+  -f Dockerfiles/lambda_get_study_assignment.Dockerfile \
+  -t get-study-assignment:local \
+  .
+```
+
+ECR pushes should use **`./scripts/build_and_push_lambda_image_to_ecr.sh`** so the image platform always matches the function.
+
+```bash
 docker run --rm --name get-study-assignment-smoke -p 9000:8080 \
   -e AWS_PROFILE=YOUR_AWS_PROFILE \
   -e AWS_REGION=us-east-2 \
@@ -104,48 +113,48 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
 
 ## Prod backend
 
-**Stub (default):** there is no deployed `get_study_assignment` Lambda wired for this suite yet. `SMOKE_BACKEND=prod` prints a short message and exits **0**; no tests run.
+**Active path:** `SMOKE_BACKEND=prod` runs the same suite as local/docker, invoking the deployed function with `boto3` `lambda.invoke`. You must set `SMOKE_ALLOW_PROD=true` (safety gate) and supply the same DynamoDB table names and region as local/docker so fixtures can seed and tear down data.
 
-```bash
-PYTHONPATH=. SMOKE_BACKEND=prod \
-  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
-```
-
-Stub via CLI flag:
-
-```bash
-PYTHONPATH=. uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend prod
-```
-
-**Live (when a function exists):** real `lambda.invoke` with the same assertions as local/docker. Replace `REPLACE_WITH_LAMBDA_FUNCTION_NAME` with the function name.
+**IAM:** the principal running the smoke tests needs **`lambda:InvokeFunction`** on the target function (and the usual DynamoDB/S3 permissions the suite already uses). If invoke is denied, errors call out `AccessDeniedException` and this permission; if the function name or region is wrong, expect `ResourceNotFoundException`.
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
   USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
   STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
   SMOKE_BACKEND=prod \
-  SMOKE_PROD_ENABLED=true \
   SMOKE_ALLOW_PROD=true \
-  SMOKE_PROD_LAMBDA_NAME=REPLACE_WITH_LAMBDA_FUNCTION_NAME \
+  SMOKE_PROD_LAMBDA_NAME=get_study_assignment \
   uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
 
-Live with an optional qualifier (version or alias):
+Same run using the CLI flag:
+
+```bash
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  SMOKE_ALLOW_PROD=true \
+  SMOKE_PROD_LAMBDA_NAME=get_study_assignment \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend prod
+```
+
+Optional qualifier (version or alias):
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
   USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
   STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
   SMOKE_BACKEND=prod \
-  SMOKE_PROD_ENABLED=true \
   SMOKE_ALLOW_PROD=true \
-  SMOKE_PROD_LAMBDA_NAME=REPLACE_WITH_LAMBDA_FUNCTION_NAME \
+  SMOKE_PROD_LAMBDA_NAME=get_study_assignment \
   SMOKE_PROD_LAMBDA_QUALIFIER=REPLACE_WITH_ALIAS_OR_VERSION \
   uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
+
+Without `SMOKE_ALLOW_PROD=true`, the runner exits immediately with an explicit refusal (no Lambda call).
 
 ## Layout
 
 - `run_handler_smoke_tests.py` — CLI and backend selection
 - `handler_smoke_suite.py` — shared tests and fixture lifecycle
-- `handler_invokers.py` — local in-process, Docker RIE HTTP, optional prod `lambda.invoke`
+- `handler_invokers.py` — local in-process, Docker RIE HTTP, prod `lambda.invoke`

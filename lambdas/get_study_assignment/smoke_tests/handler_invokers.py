@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from urllib import error, request
 
 import boto3
+from botocore.exceptions import ClientError
 
 import lambdas.get_study_assignment.handler as handler_module
 from jobs.mirrorview.constants import DEFAULT_BUCKET
@@ -151,7 +152,30 @@ class ProdLambdaHandlerInvoker:
 
         try:
             response = self._client.invoke(**invoke_kwargs)
-        except Exception as exc:  # pragma: no cover - boto3 service errors vary
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code == "AccessDeniedException":
+                raise HandlerInvocationError(
+                    backend=self.backend_name,
+                    message=(
+                        f"lambda invoke denied (IAM): {exc}. "
+                        "Grant the caller lambda:InvokeFunction on the target function."
+                    ),
+                ) from exc
+            if code == "ResourceNotFoundException":
+                raise HandlerInvocationError(
+                    backend=self.backend_name,
+                    message=(
+                        f"lambda function not found: {exc}. "
+                        "Check SMOKE_PROD_LAMBDA_NAME, AWS_REGION, and SMOKE_PROD_LAMBDA_QUALIFIER "
+                        "if set."
+                    ),
+                ) from exc
+            raise HandlerInvocationError(
+                backend=self.backend_name,
+                message=f"lambda invoke request failed: {exc}",
+            ) from exc
+        except Exception as exc:  # pragma: no cover - unexpected transport errors
             raise HandlerInvocationError(
                 backend=self.backend_name,
                 message=f"lambda invoke request failed: {exc}",

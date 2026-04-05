@@ -17,8 +17,31 @@ from lib.testing_utils import _require_env
 
 SMOKE_BACKENDS = ("local", "docker", "prod")
 DEFAULT_DOCKER_INVOKE_URL = "http://127.0.0.1:9000/2015-03-31/functions/function/invocations"
-# When a deployed Lambda exists, set SMOKE_PROD_ENABLED=true (plus SMOKE_ALLOW_PROD and
-# SMOKE_PROD_LAMBDA_NAME) to run the suite against AWS Invoke; otherwise prod is a no-op stub.
+
+_PROD_SMOKE_ENV_VARS = (
+    "AWS_REGION",
+    "SMOKE_PROD_LAMBDA_NAME",
+    "USER_ASSIGNMENTS_TABLE_NAME",
+    "STUDY_ASSIGNMENT_COUNTER_TABLE_NAME",
+)
+
+
+def _validate_prod_smoke_env() -> None:
+    """Refuse or fail fast with an explicit list of required prod smoke variables."""
+    if os.getenv("SMOKE_ALLOW_PROD") != "true":
+        raise RuntimeError(
+            "Prod smoke tests refused: set SMOKE_ALLOW_PROD=true to acknowledge you intend to "
+            "invoke the deployed Lambda and run the suite (fixtures use DynamoDB and S3)."
+        )
+    missing = [name for name in _PROD_SMOKE_ENV_VARS if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(
+            "Prod smoke tests missing required environment variables: "
+            + ", ".join(missing)
+            + ". Required: AWS_REGION, SMOKE_PROD_LAMBDA_NAME, "
+            "USER_ASSIGNMENTS_TABLE_NAME, STUDY_ASSIGNMENT_COUNTER_TABLE_NAME "
+            "(tables match local/docker; the handler is invoked via lambda:InvokeFunction)."
+        )
 
 
 def _parse_backend(backend: str | None) -> str:
@@ -44,8 +67,6 @@ def _build_docker_invoker() -> DockerHandlerInvoker:
 
 
 def _build_prod_invoker() -> ProdLambdaHandlerInvoker:
-    if os.getenv("SMOKE_ALLOW_PROD") != "true":
-        raise RuntimeError("Prod smoke tests require SMOKE_ALLOW_PROD=true")
     return ProdLambdaHandlerInvoker(
         region_name=_require_env("AWS_REGION"),
         function_name=_require_env("SMOKE_PROD_LAMBDA_NAME"),
@@ -65,14 +86,8 @@ def build_invoker(*, backend: str) -> HandlerInvoker:
 
 def run_for_backend(backend: str | None = None) -> int:
     selected_backend = _parse_backend(backend)
-    if selected_backend == "prod" and os.getenv("SMOKE_PROD_ENABLED", "").lower() != "true":
-        print(
-            "SMOKE_BACKEND=prod: deployed get_study_assignment Lambda is not wired yet; "
-            "prod smoke is stubbed (no tests run, exit 0). "
-            "When the function exists, set SMOKE_PROD_ENABLED=true, SMOKE_ALLOW_PROD=true, "
-            "SMOKE_PROD_LAMBDA_NAME, and the same AWS_REGION / DynamoDB table env vars as local."
-        )
-        return 0
+    if selected_backend == "prod":
+        _validate_prod_smoke_env()
     invoker = build_invoker(backend=selected_backend)
 
     class ConfiguredHandlerSmokeSuite(TestHandlerSmokeSuite):

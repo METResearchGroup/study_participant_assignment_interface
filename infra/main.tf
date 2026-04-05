@@ -153,6 +153,7 @@ resource "aws_lambda_function" "get_study_assignment" {
   role          = aws_iam_role.get_study_assignment_lambda.arn
   package_type  = "Image"
   image_uri     = local.lambda_image_uri_effective
+  architectures = ["x86_64"]
 
   memory_size = var.lambda_memory_size
 
