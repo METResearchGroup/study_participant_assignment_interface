@@ -1,5 +1,10 @@
 # Tool versions match uv.lock (dev dependency group). Run `uv sync` before committing.
+# Hadolint hook image is v2.14.0 (same minor as hadolint-action in CI).
 repos:
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.14.0
+    hooks:
+      - id: hadolint-docker
   - repo: local
     hooks:
       - id: ruff-check
