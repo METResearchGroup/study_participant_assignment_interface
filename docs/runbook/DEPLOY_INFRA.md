@@ -240,6 +240,14 @@ terraform -chdir=infra output lambda_function_name
 
 ## Build and push Lambda image
 
+### CPU architecture
+
+The image-based Lambda is **x86_64** in this stack (`architectures` in `infra/main.tf`; AWS also defaults to x86_64 when unset). Container images are **platform-specific**: `docker build` on an Apple Silicon Mac often produces **linux/arm64**, which does not run on an x86_64 function and surfaces as **`Runtime.InvalidEntrypoint`** / **`ProcessSpawnFailed`**, not as a smoke-test logic failure.
+
+The push script **`scripts/build_and_push_lambda_image_to_ecr.sh`** uses **`docker buildx build`** with default **`linux/amd64`**, aligned with x86_64 Lambda. If you move the function to Graviton (**arm64**), set **`DOCKER_PLATFORM=linux/arm64`** or pass **`--platform linux/arm64`** when running the script, and set Terraform **`architectures = ["arm64"]`** to match.
+
+### Push commands
+
 After the ECR repository exists, build from the **repository root** and push `latest` plus an immutable tag (short `git` SHA, or a UTC timestamp if not in a git checkout):
 
 ```bash
@@ -263,6 +271,32 @@ aws ecr describe-images --repository-name get_study_assignment --region us-east-
 ```
 
 You should see `latest` and the immutable tag from the script output. Then run **Apply the plan** (full apply); the default Lambda URI is `ecr_repository_url:latest`, matching the push. Use `-var='lambda_image_uri=...@sha256:...'` when you need a digest-pinned update.
+
+### Rolling the function after pushing `:latest`
+
+Terraform’s `image_uri` string may stay `...:latest` with **no plan diff** after a new push to ECR, so Lambda can keep running the previous image. To force the function to use the new image immediately, update by **digest** (recommended):
+
+```bash
+DIGEST=$(aws ecr describe-images \
+  --repository-name get_study_assignment \
+  --region us-east-2 \
+  --image-ids imageTag=latest \
+  --query 'imageDetails[0].imageDigest' \
+  --output text)
+
+REPO="$(terraform -chdir=infra output -raw ecr_repository_url)"
+
+aws lambda update-function-code \
+  --function-name get_study_assignment \
+  --region us-east-2 \
+  --image-uri "${REPO}@${DIGEST}"
+
+aws lambda wait function-updated-v2 \
+  --function-name get_study_assignment \
+  --region us-east-2
+```
+
+**Terraform alternative:** `terraform -chdir=infra apply -var="lambda_image_uri=${REPO}@${DIGEST}"` (or a unique tag) so state matches production.
 
 **Out of scope in this runbook:** production `aws lambda invoke` smoke tests; digest-pinned deploy automation (see project planning docs).
 

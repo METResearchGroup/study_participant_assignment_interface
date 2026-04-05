@@ -1,6 +1,7 @@
 # AWS Lambda container image for lambdas/get_study_assignment/handler.py
-# Build from repo root:
-#   docker build -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
+# Build from repo root (linux/amd64 matches default x86_64 Lambda; use buildx on Apple Silicon):
+#   docker buildx build --platform linux/amd64 --load \
+#     -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
 
 FROM public.ecr.aws/lambda/python:3.12
 
