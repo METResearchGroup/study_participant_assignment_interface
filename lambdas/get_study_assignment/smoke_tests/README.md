@@ -108,8 +108,6 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
 
 **IAM:** the principal running the smoke tests needs **`lambda:InvokeFunction`** on the target function (and the usual DynamoDB/S3 permissions the suite already uses). If invoke is denied, errors call out `AccessDeniedException` and this permission; if the function name or region is wrong, expect `ResourceNotFoundException`.
 
-Canonical command for the deployed function from PR #9:
-
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
   USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
