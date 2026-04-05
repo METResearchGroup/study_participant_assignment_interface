@@ -17,3 +17,23 @@ output "study_assignment_counter_table_arn" {
   description = "DynamoDB table ARN for study assignment counters."
   value       = aws_dynamodb_table.study_assignment_counter.arn
 }
+
+output "ecr_repository_url" {
+  description = "ECR repository URL for the get_study_assignment image (account.dkr.ecr.region.amazonaws.com/repo)."
+  value       = aws_ecr_repository.get_study_assignment.repository_url
+}
+
+output "ecr_repository_name" {
+  description = "ECR repository name for get_study_assignment."
+  value       = aws_ecr_repository.get_study_assignment.name
+}
+
+output "lambda_function_name" {
+  description = "Deployed get_study_assignment Lambda function name."
+  value       = aws_lambda_function.get_study_assignment.function_name
+}
+
+output "lambda_function_arn" {
+  description = "Deployed get_study_assignment Lambda function ARN."
+  value       = aws_lambda_function.get_study_assignment.arn
+}
