@@ -17,11 +17,15 @@ Use the same AWS credentials you use for normal development (profile, env vars, 
 Backend selection:
 
 - Env: `SMOKE_BACKEND=local|docker|prod` (default `local`)
-- CLI: `uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend docker`
+- CLI (full example from repo root):
+
+  `PYTHONPATH=. AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=user_assignments STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend docker`
 
 ## Local backend (default)
 
 Invokes `handler` in the same Python process (fixtures still use real AWS for DynamoDB/S3).
+
+Default backend is `local`; you can omit `SMOKE_BACKEND` or set it explicitly.
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
@@ -30,25 +34,42 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
   uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
 
-Explicit:
+Same run with an explicit backend env var:
 
 ```bash
-SMOKE_BACKEND=local ...
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  SMOKE_BACKEND=local \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
+```
+
+Same run using the CLI flag instead of `SMOKE_BACKEND`:
+
+```bash
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend local
 ```
 
 ## Docker backend
 
-Build and run the Lambda image (see `Dockerfiles/lambda_get_study_assignment.Dockerfile`), map port **9000 → 8080**, and ensure the **container** can reach AWS (e.g. mount credentials if you use a profile):
+Use two terminals from the repo root. Replace `YOUR_AWS_PROFILE` with your profile name (or remove `-e AWS_PROFILE=...` if the container should use other credential env vars).
+
+### Terminal 1 — build image and start Lambda RIE
 
 ```bash
 docker build -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
-docker run --rm -p 9000:8080 \
-  -e AWS_PROFILE=your-profile -e AWS_REGION=us-east-2 \
+
+docker run --rm --name get-study-assignment-smoke -p 9000:8080 \
+  -e AWS_PROFILE=YOUR_AWS_PROFILE \
+  -e AWS_REGION=us-east-2 \
   -v "$HOME/.aws:/root/.aws:ro" \
   get-study-assignment:local
 ```
 
-Then:
+### Terminal 2 — run smoke tests against RIE
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
@@ -59,21 +80,44 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
   uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
 
-Optional:
+Docker backend via CLI flag:
 
-- `SMOKE_DOCKER_TIMEOUT_SECONDS` (default `10`)
+```bash
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  SMOKE_DOCKER_INVOKE_URL=http://127.0.0.1:9000/2015-03-31/functions/function/invocations \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend docker
+```
+
+Optional longer HTTP timeout (full command):
+
+```bash
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  SMOKE_BACKEND=docker \
+  SMOKE_DOCKER_INVOKE_URL=http://127.0.0.1:9000/2015-03-31/functions/function/invocations \
+  SMOKE_DOCKER_TIMEOUT_SECONDS=30 \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
+```
 
 ## Prod backend
 
 **Stub (default):** there is no deployed `get_study_assignment` Lambda wired for this suite yet. `SMOKE_BACKEND=prod` prints a short message and exits **0**; no tests run.
 
 ```bash
-SMOKE_BACKEND=prod uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
+PYTHONPATH=. SMOKE_BACKEND=prod \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
 
-(`PYTHONPATH=.` is only needed if your environment does not already resolve the `lambdas` package.)
+Stub via CLI flag:
 
-**Live (when a function exists):** real `lambda.invoke` with the same assertions as local/docker:
+```bash
+PYTHONPATH=. uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py --backend prod
+```
+
+**Live (when a function exists):** real `lambda.invoke` with the same assertions as local/docker. Replace `REPLACE_WITH_LAMBDA_FUNCTION_NAME` with the function name.
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
@@ -82,13 +126,23 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
   SMOKE_BACKEND=prod \
   SMOKE_PROD_ENABLED=true \
   SMOKE_ALLOW_PROD=true \
-  SMOKE_PROD_LAMBDA_NAME=<lambda-function-name> \
+  SMOKE_PROD_LAMBDA_NAME=REPLACE_WITH_LAMBDA_FUNCTION_NAME \
   uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
 ```
 
-Optional:
+Live with an optional qualifier (version or alias):
 
-- `SMOKE_PROD_LAMBDA_QUALIFIER` (version or alias)
+```bash
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  SMOKE_BACKEND=prod \
+  SMOKE_PROD_ENABLED=true \
+  SMOKE_ALLOW_PROD=true \
+  SMOKE_PROD_LAMBDA_NAME=REPLACE_WITH_LAMBDA_FUNCTION_NAME \
+  SMOKE_PROD_LAMBDA_QUALIFIER=REPLACE_WITH_ALIAS_OR_VERSION \
+  uv run python lambdas/get_study_assignment/smoke_tests/run_handler_smoke_tests.py
+```
 
 ## Layout
 
