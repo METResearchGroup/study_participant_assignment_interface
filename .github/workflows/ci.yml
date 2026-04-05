@@ -38,3 +38,18 @@ jobs:
 
       - name: Pyright
         run: uv run pyright
+
+  lambda-image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Lambda image (linux/amd64)
+        run: |
+          docker buildx build --platform linux/amd64 --load \
+            -f Dockerfiles/lambda_get_study_assignment.Dockerfile \
+            -t get-study-assignment:ci \
+            .

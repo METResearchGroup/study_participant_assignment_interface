@@ -59,9 +59,18 @@ Use two terminals from the repo root. Replace `YOUR_AWS_PROFILE` with your profi
 
 ### Terminal 1 — build image and start Lambda RIE
 
-```bash
-docker build -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
+For **prod parity** with default x86_64 Lambda, build **linux/amd64** (on Apple Silicon this may use QEMU and be slower):
 
+```bash
+docker buildx build --platform linux/amd64 --load \
+  -f Dockerfiles/lambda_get_study_assignment.Dockerfile \
+  -t get-study-assignment:local \
+  .
+```
+
+ECR pushes should use **`./scripts/build_and_push_lambda_image_to_ecr.sh`** so the image platform always matches the function.
+
+```bash
 docker run --rm --name get-study-assignment-smoke -p 9000:8080 \
   -e AWS_PROFILE=YOUR_AWS_PROFILE \
   -e AWS_REGION=us-east-2 \
@@ -107,8 +116,6 @@ PYTHONPATH=. AWS_REGION=us-east-2 \
 **Active path:** `SMOKE_BACKEND=prod` runs the same suite as local/docker, invoking the deployed function with `boto3` `lambda.invoke`. You must set `SMOKE_ALLOW_PROD=true` (safety gate) and supply the same DynamoDB table names and region as local/docker so fixtures can seed and tear down data.
 
 **IAM:** the principal running the smoke tests needs **`lambda:InvokeFunction`** on the target function (and the usual DynamoDB/S3 permissions the suite already uses). If invoke is denied, errors call out `AccessDeniedException` and this permission; if the function name or region is wrong, expect `ResourceNotFoundException`.
-
-Canonical command for the deployed function from PR #9:
 
 ```bash
 PYTHONPATH=. AWS_REGION=us-east-2 \
