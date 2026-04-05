@@ -151,6 +151,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
         # Arrange
         records = [
             MagicMock(study_unique_assignment_key="democrat:control", counter=8),
+            MagicMock(study_unique_assignment_key="democrat:training_assisted", counter=1),
             MagicMock(study_unique_assignment_key="republican:control", counter=1),
             MagicMock(study_unique_assignment_key="republican:training_assisted", counter=1),
         ]
@@ -163,7 +164,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
             )
 
         # Assert
-        expected = ("democrat:training_assisted", 0)
+        expected = ("democrat:training_assisted", 1)
         assert result == expected
 
     def test_select_least_key_raises_when_no_candidates(self):
