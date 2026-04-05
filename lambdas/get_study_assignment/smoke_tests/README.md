@@ -59,9 +59,18 @@ Use two terminals from the repo root. Replace `YOUR_AWS_PROFILE` with your profi
 
 ### Terminal 1 — build image and start Lambda RIE
 
-```bash
-docker build -f Dockerfiles/lambda_get_study_assignment.Dockerfile -t get-study-assignment:local .
+For **prod parity** with default x86_64 Lambda, build **linux/amd64** (on Apple Silicon this may use QEMU and be slower):
 
+```bash
+docker buildx build --platform linux/amd64 --load \
+  -f Dockerfiles/lambda_get_study_assignment.Dockerfile \
+  -t get-study-assignment:local \
+  .
+```
+
+ECR pushes should use **`./scripts/build_and_push_lambda_image_to_ecr.sh`** so the image platform always matches the function.
+
+```bash
 docker run --rm --name get-study-assignment-smoke -p 9000:8080 \
   -e AWS_PROFILE=YOUR_AWS_PROFILE \
   -e AWS_REGION=us-east-2 \
