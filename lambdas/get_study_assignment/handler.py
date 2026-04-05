@@ -168,11 +168,7 @@ def set_user_assignment_record(
     prolific_id: str,
     political_party: str,
 ):
-    """Set the user assignment record for a given user.
-
-    Algorithm:
-    1.
-    """
+    """Set the user assignment record for a given user."""
     assigned_condition_dict: dict = assign_user_to_condition(
         study_id=study_id,
         study_iteration_id=study_iteration_id,
