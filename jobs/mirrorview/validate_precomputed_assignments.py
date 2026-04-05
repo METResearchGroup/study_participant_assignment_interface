@@ -13,13 +13,13 @@ Usage (from repo root):
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import pandas as pd
 
 import jobs.mirrorview.precompute_assignments as pre
 from lib.constants import ROOT_DIR
+from lib.mirrorview_assignment_validate import get_post_ids_list, validate_assigned_post_ids
 
 _EXPECTED_ASSIGNMENT_COLUMNS = (
     "id",
@@ -28,38 +28,6 @@ _EXPECTED_ASSIGNMENT_COLUMNS = (
     "condition",
     "created_at",
 )
-
-
-def _infer_oversample_left(left_n: int, right_n: int) -> bool:
-    if left_n == 11 and right_n == 9:
-        return True
-    if left_n == 10 and right_n == 10:
-        return False
-    raise AssertionError(
-        "Left/right counts must be 11/9 (oversample left on high-toxicity) or 10/10 "
-        f"(oversample right); got {left_n}/{right_n}"
-    )
-
-
-def _get_ground_truth_sample_toxicity_political_stance(
-    *,
-    post_ids: list[str],
-    ground_truth_post_pool: pd.DataFrame,
-    context: str,
-) -> pd.DataFrame:
-    """For the given row ID, get the ground truth sample toxicity + stance."""
-    rows: list[dict[str, str]] = []
-    for pid in post_ids:
-        if pid not in ground_truth_post_pool.index:
-            raise ValueError(f"{context}: unknown post_primary_key {pid!r}")
-        row = ground_truth_post_pool.loc[pid]
-        rows.append(
-            {
-                "sample_toxicity_type": str(row["sample_toxicity_type"]),
-                "sampled_stance": str(row["sampled_stance"]),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def _validate_csv_file_exists(csv_path: Path) -> None:
@@ -74,17 +42,6 @@ def _validate_no_missing_columns(df: pd.DataFrame, csv_path: Path) -> None:
     missing = [c for c in _EXPECTED_ASSIGNMENT_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"{csv_path}: missing columns {missing}")
-
-
-def get_post_ids_list(raw_post_ids: str, context: str) -> list[str]:
-    """Validates that the assigned post IDs are a list of strings."""
-    post_ids = json.loads(str(raw_post_ids))
-    if not isinstance(post_ids, list):
-        raise TypeError(f"{context}: assigned_post_ids must decode to a list")
-    for pid in post_ids:
-        if not isinstance(pid, str):
-            raise TypeError(f"{context}: assigned_post_ids must be a list of strings")
-    return post_ids
 
 
 def _validate_expected_condition(
@@ -137,18 +94,10 @@ def validate_assignments_file(
             political_party=political_party,
         )
         post_ids = get_post_ids_list(raw_post_ids, context)
-        sampled = _get_ground_truth_sample_toxicity_political_stance(
-            post_ids=post_ids,
-            ground_truth_post_pool=ground_truth_post_pool,
-            context=context,
-        )
-
-        total_left_leaning_posts = int((sampled["sampled_stance"] == "left").sum())
-        total_right_leaning_posts = int((sampled["sampled_stance"] == "right").sum())
-        oversample_left = _infer_oversample_left(
-            total_left_leaning_posts, total_right_leaning_posts
-        )
-        pre._validate_assignment_invariants(sampled, oversample_left)
+        try:
+            validate_assigned_post_ids(post_ids, ground_truth_post_pool)
+        except Exception as exc:
+            raise type(exc)(f"{context}: {exc}") from exc
 
     return len(df)
 
