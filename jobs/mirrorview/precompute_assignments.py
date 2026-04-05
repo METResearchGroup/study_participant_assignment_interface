@@ -32,7 +32,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-from lib.constants import ROOT_DIR
+from jobs.mirrorview.constants import LOCAL_DATA_PREFIX, OUTPUT_RECORDS_FILENAME
+from jobs.mirrorview.generate_assignment_ids import generate_assignment_ids
 from lib.timestamp_utils import get_current_timestamp
 
 STANCES = ["left", "right"]
@@ -67,8 +68,7 @@ INPUT_POSTS_FILENAME = "all_mirrors_claude.csv"
 INPUT_POSTS_PATH = CURRENT_DIR / INPUT_POSTS_FILENAME
 
 TOTAL_RECORDS_TO_CREATE = 1000
-OUTPUT_RECORDS_FILENAME = "assignments.csv"
-OUTPUT_RECORDS_ROOT_PREFIX = ROOT_DIR / "data" / "mirrorview" / get_current_timestamp()
+OUTPUT_RECORDS_ROOT_PREFIX = LOCAL_DATA_PREFIX / get_current_timestamp()
 
 
 def load_input_posts() -> pd.DataFrame:
@@ -239,7 +239,7 @@ def generate_and_export_precomputed_assignments(
     n = len(precomputed_assignments)
     exportable_assignments = pd.DataFrame(
         {
-            "id": [f"{political_party}-{condition}-{i + 1:04d}" for i in range(n)],
+            "id": generate_assignment_ids(political_party, condition, n),
             "assigned_post_ids": precomputed_assignments["assigned_post_ids"],
             "political_party": political_party,
             "condition": condition,
