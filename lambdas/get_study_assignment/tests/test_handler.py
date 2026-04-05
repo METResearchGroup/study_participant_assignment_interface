@@ -323,15 +323,16 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_no_match(self):
-        """Test current no-match behavior raises IndexError."""
+        """Test no matching keys raises ValueError with party and condition in message."""
         # Arrange
         with patch.object(h.s3, "list_keys_ordered", return_value=[]):
             # Act / Assert
-            with pytest.raises(IndexError):
+            with pytest.raises(ValueError, match="democrat") as exc_info:
                 h.get_latest_uploaded_precomputed_assignments_s3_key(
                     political_party="democrat",
                     condition="control",
                 )
+        assert "control" in str(exc_info.value)
 
 
 class TestSetUserAssignmentRecord:

@@ -158,6 +158,12 @@ def get_latest_uploaded_precomputed_assignments_s3_key(
         for key in precomputed_keys
         if political_party in key and condition in key and key.endswith(OUTPUT_RECORDS_FILENAME)
     ]
+    if not relevant_precomputed_keys:
+        raise ValueError(
+            "No precomputed assignment S3 object keys match "
+            f"political_party={political_party!r}, condition={condition!r} "
+            f"(prefix={DEFAULT_S3_PREFIX!r}, filename suffix={OUTPUT_RECORDS_FILENAME!r})"
+        )
     return sorted(relevant_precomputed_keys, reverse=True)[0]
 
 
