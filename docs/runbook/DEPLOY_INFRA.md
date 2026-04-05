@@ -9,10 +9,14 @@ This runbook explains how to deploy the PR 3 DynamoDB infrastructure with Terraf
 - Terraform installed and available on your `PATH`
 - Python 3.12 and `uv` installed
 - AWS CLI v2 installed
+- Docker (for building and pushing the Lambda container image)
 - AWS credentials for the target AWS account with permission to:
   - create and update DynamoDB tables
   - read DynamoDB table metadata
   - read and write DynamoDB items
+  - create and manage ECR repositories and images (for the image-based Lambda)
+  - create and manage IAM roles and policies used by Lambda
+  - create and update Lambda functions
 
 ## AWS CLI Setup
 
@@ -151,20 +155,59 @@ Expected output:
 Success! The configuration is valid.
 ```
 
-### 4. Review the plan
+### 4. Format check (optional but recommended before commit)
 
 ```bash
-terraform -chdir=infra plan
+terraform -chdir=infra fmt -check
 ```
+
+If this reports files that need formatting, run `terraform -chdir=infra fmt` and commit the result.
+
+### 5. Review the plan
+
+By default the Lambda image URI is **`${ecr_repository_url}:${lambda_image_tag}`** (see `infra/main.tf` `locals.lambda_image_uri_effective`), with `lambda_image_tag` defaulting to `latest`. You can run **`terraform -chdir=infra plan`** with no extra `-var` flags.
+
+**Overrides (optional):**
+
+- **Digest or full URI:** `-var='lambda_image_uri=<account>.dkr.ecr.<region>.amazonaws.com/get_study_assignment@sha256:...'`
+- **Different tag only:** `-var='lambda_image_tag=my-build-id'` (when `lambda_image_uri` is left unset)
+
+**Caveat:** After you push a new image to `:latest`, the Terraform string may still be `...:latest`, so `plan` can show no diff even though ECR’s image changed. For immutable deploys, pass `lambda_image_uri` with a digest (or a unique tag) when you need Terraform to force an update.
 
 Look for:
 
-- creation of exactly two DynamoDB tables
-- one table for `user_assignments`
-- one table for `study_assignment_counter`
-- region `us-east-2`
+- creation or update of two DynamoDB tables (`user_assignments`, `study_assignment_counter`)
+- creation of ECR repository `get_study_assignment`, IAM role `get_study_assignment-lambda`, and image Lambda `get_study_assignment`
+- no unexpected destruction of existing DynamoDB tables
 
-### 5. Apply the plan
+### 6. Bootstrap order (first time: ECR, then image, then Lambda)
+
+AWS needs a **real** image in ECR before the `aws_lambda_function` can be created or updated with `package_type = "Image"`. Pick one workflow:
+
+**Option A — targeted apply (ECR first)**
+
+1. Apply only the repository (and any dependencies you need):
+
+   ```bash
+   terraform -chdir=infra apply -target=aws_ecr_repository.get_study_assignment
+   ```
+
+   No `lambda_image_uri` variable is required; the targeted apply only creates the ECR repository. AWS still validates the image when you later apply the Lambda.
+
+2. Push an image (see **Build and push Lambda image** below).
+
+3. Apply the full stack (default image URI will be `ecr_repository_url:latest` once ECR exists).
+
+**Option B — image already exists**
+
+If you already have a suitable image in ECR (for example from another machine), run `terraform -chdir=infra apply`. Optionally set `-var='lambda_image_uri=...'` or `-var='lambda_image_tag=...'` if you are not using `latest`.
+
+**Decisions to confirm before production apply**
+
+- **First Lambda create:** an image must exist for the resolved URI (default `...:latest` after you push `latest`, or whatever tag you set).
+- **`s3:ListBucket` scope:** current IAM allows listing the whole assignments bucket (`var.s3_assignments_bucket_name`, default `jspsych-mirror-view-3`). To narrow scope, add an IAM condition on `s3:prefix` aligned with mirrorview’s `precomputed_assignments` prefix in `jobs/mirrorview/constants.py`.
+
+### 7. Apply the plan
 
 ```bash
 terraform -chdir=infra apply
@@ -178,7 +221,7 @@ Expected output:
 Apply complete! Resources: ...
 ```
 
-### 6. Capture the Terraform outputs
+### 8. Capture the Terraform outputs
 
 ```bash
 terraform -chdir=infra output
@@ -191,7 +234,37 @@ If specific outputs are defined for the table names, capture them directly:
 ```bash
 terraform -chdir=infra output user_assignments_table_name
 terraform -chdir=infra output study_assignment_counter_table_name
+terraform -chdir=infra output ecr_repository_url
+terraform -chdir=infra output lambda_function_name
 ```
+
+## Build and push Lambda image
+
+After the ECR repository exists, build from the **repository root** and push `latest` plus an immutable tag (short `git` SHA, or a UTC timestamp if not in a git checkout):
+
+```bash
+export AWS_REGION=us-east-2
+export ECR_REPOSITORY_URL="$(terraform -chdir=infra output -raw ecr_repository_url)"
+bash scripts/build_and_push_lambda_image_to_ecr.sh
+```
+
+Equivalent using flags:
+
+```bash
+bash scripts/build_and_push_lambda_image_to_ecr.sh \
+  --repo-url "$(terraform -chdir=infra output -raw ecr_repository_url)" \
+  --region us-east-2
+```
+
+Confirm both tags in ECR:
+
+```bash
+aws ecr describe-images --repository-name get_study_assignment --region us-east-2
+```
+
+You should see `latest` and the immutable tag from the script output. Then run **Apply the plan** (full apply); the default Lambda URI is `ecr_repository_url:latest`, matching the push. Use `-var='lambda_image_uri=...@sha256:...'` when you need a digest-pinned update.
+
+**Out of scope in this runbook:** production `aws lambda invoke` smoke tests; digest-pinned deploy automation (see project planning docs).
 
 ## Smoke Test
 
