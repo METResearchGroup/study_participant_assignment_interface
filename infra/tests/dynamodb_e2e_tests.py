@@ -9,7 +9,6 @@ Run:
 from __future__ import annotations
 
 import json
-import os
 import traceback
 import uuid
 from collections.abc import Iterable
@@ -31,28 +30,15 @@ from lib.dynamodb import (
     list_assignment_counters_for_party,
     put_user_assignment,
 )
+from lib.testing_utils import _assert_equal, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
 TEST_ENV_PREFIX = "dev"
 
 
-def _require_env(name: str) -> str:
-    """Return a required env var or raise with a clear message."""
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
 def _short_uuid() -> str:
     """Return a short, stable-for-logging UUID suffix."""
     return uuid.uuid4().hex[:8]
-
-
-def _assert_equal(actual, expected, message: str) -> None:
-    """Raise AssertionError with a consistent message on mismatch."""
-    if actual != expected:
-        raise AssertionError(f"{message}. Expected {expected}, got {actual}")
 
 
 class DynamoDbSmokeTestBase:

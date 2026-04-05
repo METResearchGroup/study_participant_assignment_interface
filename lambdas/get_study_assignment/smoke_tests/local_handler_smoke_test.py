@@ -9,7 +9,6 @@ Run:
 from __future__ import annotations
 
 import json
-import os
 import traceback
 import uuid
 from collections.abc import Iterable
@@ -23,26 +22,10 @@ import lambdas.get_study_assignment.handler as h
 from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lib.s3 import S3
+from lib.testing_utils import _assert_equal, _assert_true, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
 TEST_ENV_PREFIX = "smoke"
-
-
-def _require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-def _assert_true(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
-
-
-def _assert_equal(actual: Any, expected: Any, message: str) -> None:
-    if actual != expected:
-        raise AssertionError(f"{message}. Expected {expected!r}, got {actual!r}")
 
 
 class HandlerSmokeTestBase:
