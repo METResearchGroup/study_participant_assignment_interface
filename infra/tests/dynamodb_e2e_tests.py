@@ -1,3 +1,11 @@
+"""DynamoDB smoke tests for assignment counters and user assignments.
+
+Run:
+    PYTHONPATH=. AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+    STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+    uv run python infra/tests/dynamodb_e2e_tests.py
+"""
+
 from __future__ import annotations
 
 import json
