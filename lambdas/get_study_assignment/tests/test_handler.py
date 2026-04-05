@@ -1,4 +1,8 @@
-"""Unit tests for lambdas.get_study_assignment.handler."""
+"""Unit tests for lambdas.get_study_assignment.handler.
+
+Run:
+    PYTHONPATH=. uv run pytest lambdas/get_study_assignment/tests/test_handler.py
+"""
 
 from __future__ import annotations
 
