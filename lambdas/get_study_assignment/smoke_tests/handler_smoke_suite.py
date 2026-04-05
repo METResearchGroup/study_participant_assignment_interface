@@ -1,10 +1,4 @@
-"""Local smoke tests for get_study_assignment handler orchestration.
-
-Run:
-    PYTHONPATH=. AWS_REGION=us-east-2 USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
-    STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
-    uv run python lambdas/get_study_assignment/smoke_tests/local_handler_smoke_test.py
-"""
+"""Shared smoke suite for get_study_assignment across invocation backends."""
 
 from __future__ import annotations
 
@@ -17,11 +11,10 @@ import boto3
 import pandas as pd
 from boto3.dynamodb.conditions import Key
 
-import lambdas.get_study_assignment.handler as h
 from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
+from lambdas.get_study_assignment.smoke_tests.handler_invokers import HandlerInvoker
 from lib.s3 import S3
-from lib.smoke_testing_utils import run_smoke_tests
 from lib.testing_utils import _assert_equal, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
@@ -29,6 +22,13 @@ TEST_ENV_PREFIX = "local-smoke"
 
 
 class HandlerSmokeTestBase:
+    INVOKER: HandlerInvoker | None = None
+
+    def __init__(self) -> None:
+        if self.INVOKER is None:
+            raise ValueError("Handler smoke suite requires INVOKER to be configured")
+        self._invoker = self.INVOKER
+
     def setup(self) -> None:
         self.region_name = _require_env("AWS_REGION")
         self.user_assignments_table_name = _require_env("USER_ASSIGNMENTS_TABLE_NAME")
@@ -46,18 +46,15 @@ class HandlerSmokeTestBase:
         self.s3_store = S3(bucket=DEFAULT_BUCKET, region_name=self.region_name)
         self.created_s3_keys: set[str] = set()
 
-        # Ensure handler uses this test's table names and region.
-        h.region_name = self.region_name
-        h.user_assignments_table_name = self.user_assignments_table_name
-        h.study_assignment_counter_table_name = self.assignment_counter_table_name
-        h.s3 = self.s3_store
-
     def teardown(self) -> None:
         if not hasattr(self, "assignment_counter_table"):
             return
         self._cleanup_counter_rows_for_iteration()
         self._cleanup_user_assignments_for_iteration()
         self._cleanup_s3_fixture_objects()
+
+    def invoke_handler(self, event: dict[str, str]) -> dict[str, Any]:
+        return self._invoker.invoke(event)
 
     def _make_event(self, *, prolific_id: str, political_party: str) -> dict[str, str]:
         return {
@@ -173,16 +170,16 @@ class HandlerSmokeTestBase:
             self.s3_client.delete_object(Bucket=DEFAULT_BUCKET, Key=key)
 
 
-class TestHandlerSmoke(HandlerSmokeTestBase):
+class TestHandlerSmokeSuite(HandlerSmokeTestBase):
     def test_new_user_happy_path(self) -> None:
         """End-to-end path for a **new participant** with no prior user assignment row."""
         self._seed_party_condition_fixtures("democrat")
         event = self._make_event(prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat")
 
-        response = h.handler(event, None)
+        response = self.invoke_handler(event)
 
         # Matches `_seed_precomputed_csv`: first new democrat user lands on `control` (tie-break),
-        # counter 1 → assignment id `democrat-control-0001` → CSV row index 1.
+        # counter 1 -> assignment id `democrat-control-0001` -> CSV row index 1.
         expected_response = {
             "assigned_post_ids": [
                 "democrat-control-post-1-a",
@@ -217,13 +214,13 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
         }
         expected_counters = {"democrat:control": 1}
 
-        first_response = h.handler(event, None)
+        first_response = self.invoke_handler(event)
         counters_after_first = {
             row["study_unique_assignment_key"]: int(row["counter"])
             for row in self._query_counters_for_iteration()
         }
 
-        second_response = h.handler(event, None)
+        second_response = self.invoke_handler(event)
         counters_after_second = {
             row["study_unique_assignment_key"]: int(row["counter"])
             for row in self._query_counters_for_iteration()
@@ -291,8 +288,8 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
         }
         expected_counters = {"democrat:control": 1, "democrat:training_assisted": 1}
 
-        first_response = h.handler(first_event, None)
-        second_response = h.handler(second_event, None)
+        first_response = self.invoke_handler(first_event)
+        second_response = self.invoke_handler(second_event)
 
         _assert_equal(
             first_response,
@@ -355,8 +352,8 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
         }
         expected_counters = {"democrat:control": 1, "republican:control": 1}
 
-        democrat_response = h.handler(democrat_event, None)
-        republican_response = h.handler(republican_event, None)
+        democrat_response = self.invoke_handler(democrat_event)
+        republican_response = self.invoke_handler(republican_event)
 
         _assert_equal(
             democrat_response,
@@ -381,14 +378,3 @@ class TestHandlerSmoke(HandlerSmokeTestBase):
             expected_counters,
             "each party should have incremented only its own control cell once",
         )
-
-
-TEST_CLASSES = [TestHandlerSmoke]
-
-
-def main() -> None:
-    raise SystemExit(run_smoke_tests(TEST_CLASSES))
-
-
-if __name__ == "__main__":
-    main()
