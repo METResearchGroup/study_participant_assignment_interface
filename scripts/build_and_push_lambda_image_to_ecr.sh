@@ -2,14 +2,17 @@
 # Build Dockerfiles/lambda_get_study_assignment.Dockerfile and push :latest plus an
 # immutable tag to ECR. Run from repository root.
 #
-# Required:
-#   ECR_REPOSITORY_URL — full repository URL without tag, e.g.
-#     $(terraform -chdir=infra output -raw ecr_repository_url)
-#   AWS_REGION — e.g. us-east-2 (also used by aws ecr get-login-password)
+# Copy-paste (after ECR exists and terraform apply has been run at least once for outputs):
+#
+#   ECR_REPOSITORY_URL="$(terraform -chdir=infra output -raw ecr_repository_url)" AWS_REGION=us-east-2 ./scripts/build_and_push_lambda.sh
 #
 # Optional:
 #   --repo-url <url>   overrides ECR_REPOSITORY_URL
 #   --region <region>  overrides AWS_REGION
+#
+# Required when not using flags:
+#   ECR_REPOSITORY_URL — full repository URL without tag
+#   AWS_REGION — e.g. us-east-2 (also used by aws ecr get-login-password)
 
 set -euo pipefail
 
