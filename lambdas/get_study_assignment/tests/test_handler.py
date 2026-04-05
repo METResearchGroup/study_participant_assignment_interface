@@ -543,6 +543,31 @@ class TestGetPrecomputedAssignment:
             with pytest.raises(ValueError, match="Unexpected assigned_post_ids format"):
                 h.get_precomputed_assignment(record, payload)
 
+    def test_get_precomputed_assignment_raises_when_json_decodes_to_non_list(self):
+        """Test JSON string that decodes to a non-list raises ValueError."""
+        record = _make_record(user_id="prolific-5")
+        payload = _make_payload(assignment_id="democrat-control-0012")
+        frame = pd.DataFrame(
+            [{"id": "democrat-control-0012", "assigned_post_ids": '{"not": "a list"}'}]
+        )
+        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+            with pytest.raises(ValueError, match="must be a JSON list"):
+                h.get_precomputed_assignment(record, payload)
+
+    def test_get_precomputed_assignment_raises_when_list_elements_not_strings(self):
+        """Test list or JSON list with non-str elements raises ValueError."""
+        record = _make_record(user_id="prolific-6")
+        payload = _make_payload(assignment_id="democrat-control-0013")
+        frame = pd.DataFrame([{"id": "democrat-control-0013", "assigned_post_ids": [1, 2, 3]}])
+        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+            with pytest.raises(ValueError, match="list of strings"):
+                h.get_precomputed_assignment(record, payload)
+
+        frame_json = pd.DataFrame([{"id": "democrat-control-0013", "assigned_post_ids": "[1, 2]"}])
+        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame_json):
+            with pytest.raises(ValueError, match="list of strings"):
+                h.get_precomputed_assignment(record, payload)
+
 
 class TestHandler:
     """Tests for handler function."""

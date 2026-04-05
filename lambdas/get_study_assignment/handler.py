@@ -248,6 +248,29 @@ def load_latest_precomputed_assignments(s3_key: str) -> pd.DataFrame:
     return s3.load_csv_to_dataframe(key=s3_key)
 
 
+def _coerce_assigned_post_ids_to_str_list(
+    assigned_post_ids_raw: object, *, user_id: str
+) -> list[str]:
+    """Parse CSV cell value into list[str]; raise ValueError if shape is wrong."""
+    if isinstance(assigned_post_ids_raw, str):
+        decoded: object = json.loads(assigned_post_ids_raw)
+    elif isinstance(assigned_post_ids_raw, list):
+        decoded = assigned_post_ids_raw
+    else:
+        raise ValueError(
+            f"Unexpected assigned_post_ids format: {type(assigned_post_ids_raw)!r} "
+            f"for user {user_id!r}"
+        )
+    if not isinstance(decoded, list):
+        raise ValueError(
+            f"assigned_post_ids must be a JSON list for user {user_id!r}, "
+            f"got {type(decoded).__name__!r}"
+        )
+    if not all(isinstance(x, str) for x in decoded):
+        raise ValueError(f"assigned_post_ids must be a list of strings for user {user_id!r}")
+    return decoded
+
+
 def get_precomputed_assignment(
     user_assignment_record: UserAssignmentRecord, user_assignment_payload: UserAssignmentPayload
 ):
@@ -260,13 +283,8 @@ def get_precomputed_assignment(
     if assignment.empty:
         raise ValueError(f"Assignment not found for user {user_assignment_record.user_id}")
     assigned_post_ids_raw = assignment.iloc[0]["assigned_post_ids"]
-    if isinstance(assigned_post_ids_raw, str):
-        return json.loads(assigned_post_ids_raw)
-    if isinstance(assigned_post_ids_raw, list):
-        return assigned_post_ids_raw
-    raise ValueError(
-        f"Unexpected assigned_post_ids format: {type(assigned_post_ids_raw)!r} "
-        f"for user {user_assignment_record.user_id!r}"
+    return _coerce_assigned_post_ids_to_str_list(
+        assigned_post_ids_raw, user_id=user_assignment_record.user_id
     )
 
 
