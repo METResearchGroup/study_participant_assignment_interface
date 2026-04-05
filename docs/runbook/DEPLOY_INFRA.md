@@ -249,13 +249,13 @@ After the ECR repository exists, build from the **repository root** and push `la
 ```bash
 export AWS_REGION=us-east-2
 export ECR_REPOSITORY_URL="$(terraform -chdir=infra output -raw ecr_repository_url)"
-bash scripts/build_and_push_lambda.sh
+bash scripts/build_and_push_lambda_image_to_ecr.sh
 ```
 
 Equivalent using flags:
 
 ```bash
-bash scripts/build_and_push_lambda.sh \
+bash scripts/build_and_push_lambda_image_to_ecr.sh \
   --repo-url "$(terraform -chdir=infra output -raw ecr_repository_url)" \
   --region us-east-2
 ```

@@ -4,7 +4,7 @@
 #
 # Copy-paste (after ECR exists and terraform apply has been run at least once for outputs):
 #
-#   ECR_REPOSITORY_URL="$(terraform -chdir=infra output -raw ecr_repository_url)" AWS_REGION=us-east-2 ./scripts/build_and_push_lambda.sh
+#   ECR_REPOSITORY_URL="$(terraform -chdir=infra output -raw ecr_repository_url)" AWS_REGION=us-east-2 ./scripts/build_and_push_lambda_image_to_ecr.sh
 #
 # Optional:
 #   --repo-url <url>   overrides ECR_REPOSITORY_URL
