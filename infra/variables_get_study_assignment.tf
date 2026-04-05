@@ -1,5 +1,5 @@
 variable "lambda_image_uri" {
-  description = "Optional full ECR image URI (tag or digest). If null, the Lambda uses aws_ecr_repository.repository_url + \":\" + lambda_image_tag."
+  description = "Optional full ECR image URI (tag or digest). If null, image_uri is built from aws_ecr_repository.get_study_assignment.repository_url and lambda_image_tag."
   type        = string
   default     = null
   nullable    = true
