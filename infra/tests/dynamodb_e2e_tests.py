@@ -11,6 +11,8 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
+from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
+from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lib.dynamodb import (
     AssignmentCounterConflictError,
     UserAssignmentPayload,
@@ -27,6 +29,7 @@ TEST_ENV_PREFIX = "dev"
 
 
 def _require_env(name: str) -> str:
+    """Return a required env var or raise with a clear message."""
     value = os.getenv(name)
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
@@ -34,16 +37,19 @@ def _require_env(name: str) -> str:
 
 
 def _short_uuid() -> str:
+    """Return a short, stable-for-logging UUID suffix."""
     return uuid.uuid4().hex[:8]
 
 
 def _assert_equal(actual, expected, message: str) -> None:
+    """Raise AssertionError with a consistent message on mismatch."""
     if actual != expected:
         raise AssertionError(f"{message}. Expected {expected}, got {actual}")
 
 
 class DynamoDbSmokeTestBase:
     def setup(self) -> None:
+        """Initialize env, IDs, and DynamoDB table handles for the test."""
         self.region_name = _require_env("AWS_REGION")
         self.user_assignments_table_name = _require_env("USER_ASSIGNMENTS_TABLE_NAME")
         self.assignment_counter_table_name = _require_env("STUDY_ASSIGNMENT_COUNTER_TABLE_NAME")
@@ -56,15 +62,18 @@ class DynamoDbSmokeTestBase:
         self.assignment_counter_table = dynamodb.Table(self.assignment_counter_table_name)
 
     def teardown(self) -> None:
+        """Remove any rows created for this test iteration."""
         if not hasattr(self, "assignment_counter_table"):
             return
         self._cleanup_counter_rows_for_iteration()
         self._cleanup_user_assignments_for_iteration()
 
     def _assignment_key(self, political_party: str, condition: str) -> str:
+        """Build a unique per-test assignment key using party + condition."""
         return f"{political_party}:{condition}-{_short_uuid()}"
 
     def _seed_counter_row(self, *, study_unique_assignment_key: str, counter: int) -> None:
+        """Insert a deterministic counter row for a known starting state."""
         iteration_assignment_key = _build_iteration_assignment_key(
             self.study_iteration_id, study_unique_assignment_key
         )
@@ -81,6 +90,7 @@ class DynamoDbSmokeTestBase:
         self.assignment_counter_table.put_item(Item=item)
 
     def _cleanup_counter_rows_for_iteration(self) -> None:
+        """Delete counter rows matching the iteration key prefix."""
         prefix = f"{self.study_iteration_id}#"
         items = self._query_items(
             self.assignment_counter_table,
@@ -94,6 +104,7 @@ class DynamoDbSmokeTestBase:
         )
 
     def _cleanup_user_assignments_for_iteration(self) -> None:
+        """Delete user assignment rows matching the iteration key prefix."""
         prefix = f"{self.study_iteration_id}#"
         items = self._query_items(
             self.user_assignments_table,
@@ -107,6 +118,14 @@ class DynamoDbSmokeTestBase:
         )
 
     def _query_items(self, table, *, sort_key: str, sort_prefix: str) -> list[dict]:
+        """Query all items for (study_id, sort_key begins_with prefix).
+
+        Algorithm:
+        1. Execute a KeyConditionExpression on the partition key (study_id) with a
+           begins_with condition on the sort key.
+        2. Paginate with LastEvaluatedKey until no more pages remain.
+        3. Accumulate and return all items.
+        """
         items: list[dict] = []
         last_key = None
         key_condition = Key("study_id").eq(self.study_id) & Key(sort_key).begins_with(sort_prefix)
@@ -122,6 +141,7 @@ class DynamoDbSmokeTestBase:
         return items
 
     def _delete_items(self, table, items: Iterable[dict], *, key_fields: tuple[str, str]) -> None:
+        """Batch delete items using the provided key fields."""
         with table.batch_writer() as batch:
             for item in items:
                 key = {field: item[field] for field in key_fields}
@@ -135,16 +155,19 @@ class TestUserAssignmentSmoke(DynamoDbSmokeTestBase):
         """Round-trip user assignment payload storage and retrieval."""
         # Arrange
         user_id = f"user-{uuid.uuid4().hex}"
+        political_party = "democrat"
+        condition = "control"
         payload_data = {
-            "s3_bucket": "test-bucket",
-            "s3_key": f"assignments/{uuid.uuid4().hex}.json",
-            "assignment_id": f"assignment-{uuid.uuid4().hex}",
-            "metadata": json.dumps(
-                {
-                    "variant": "control",
-                    "note": "smoke-test",
-                }
+            "s3_bucket": DEFAULT_BUCKET,
+            "s3_key": (
+                f"{DEFAULT_S3_PREFIX}/{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
             ),
+            "assignment_id": generate_single_assignment_id(
+                political_party=political_party,
+                condition=condition,
+                index=1,
+            ),
+            "metadata": json.dumps({"political_party": political_party, "condition": condition}),
         }
         payload_model = UserAssignmentPayload.model_validate(payload_data)
 
@@ -194,7 +217,7 @@ class TestIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     def test_first_increment_returns_one(self) -> None:
         """First increment on a missing key returns 1."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("alpha", "control")
+        study_unique_assignment_key = self._assignment_key("democrat", "control")
 
         # Act
         first_counter = increment_assignment_counter(
@@ -211,7 +234,7 @@ class TestIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     def test_repeated_increment_returns_next_value(self) -> None:
         """Sequential increments return increasing counter values."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("alpha", "treatment")
+        study_unique_assignment_key = self._assignment_key("democrat", "training_assisted")
 
         # Act
         first_counter = increment_assignment_counter(
@@ -236,7 +259,7 @@ class TestIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     def test_concurrent_increment_uniqueness(self) -> None:
         """Concurrent increments return a distinct sequential set."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("beta", "control")
+        study_unique_assignment_key = self._assignment_key("republican", "control")
 
         # Act
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -268,28 +291,28 @@ class TestListAssignmentCountersForPartySmoke(DynamoDbSmokeTestBase):
     def test_list_filters_by_party_prefix(self) -> None:
         """Listing returns only counters for the requested party."""
         # Arrange
-        alpha_key_1 = self._assignment_key("alpha", "control")
-        alpha_key_2 = self._assignment_key("alpha", "treatment")
-        beta_key = self._assignment_key("beta", "control")
-        self._seed_counter_row(study_unique_assignment_key=alpha_key_1, counter=2)
-        self._seed_counter_row(study_unique_assignment_key=alpha_key_2, counter=5)
-        self._seed_counter_row(study_unique_assignment_key=beta_key, counter=3)
+        democrat_key_1 = self._assignment_key("democrat", "control")
+        democrat_key_2 = self._assignment_key("democrat", "training_assisted")
+        republican_key = self._assignment_key("republican", "control")
+        self._seed_counter_row(study_unique_assignment_key=democrat_key_1, counter=2)
+        self._seed_counter_row(study_unique_assignment_key=democrat_key_2, counter=5)
+        self._seed_counter_row(study_unique_assignment_key=republican_key, counter=3)
 
         # Act
         records = list_assignment_counters_for_party(
             study_id=self.study_id,
             study_iteration_id=self.study_iteration_id,
-            political_party="alpha",
+            political_party="democrat",
             table_name=self.assignment_counter_table_name,
             region_name=self.region_name,
         )
 
         # Assert
-        _assert_equal(len(records), 2, "Expected only alpha counters")
+        _assert_equal(len(records), 2, "Expected only democrat counters")
         counters_by_key = {record.study_unique_assignment_key: record.counter for record in records}
-        _assert_equal(counters_by_key[alpha_key_1], 2, "Alpha control counter mismatch")
-        _assert_equal(counters_by_key[alpha_key_2], 5, "Alpha treatment counter mismatch")
-        if any("beta:" in record.study_unique_assignment_key for record in records):
+        _assert_equal(counters_by_key[democrat_key_1], 2, "Democrat control counter mismatch")
+        _assert_equal(counters_by_key[democrat_key_2], 5, "Democrat training counter mismatch")
+        if any("republican:" in record.study_unique_assignment_key for record in records):
             raise AssertionError("List should exclude counters for other parties")
 
 
@@ -297,9 +320,14 @@ class TestCompareAndIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     """Smoke tests for compare-and-increment conflict and success paths."""
 
     def test_compare_and_increment_on_missing(self) -> None:
-        """Compare-and-increment on missing row with expected 0 returns 1."""
+        """Compare-and-increment on missing row with expected 0 returns 1.
+
+        This is expected for cases where we haven't created that row
+        yet (e.g., the first time that the combination of party x condition
+        is seen). We want the DynamoDB logic to handle this case for us rather
+        than requiring a manual setup script."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("gamma", "control")
+        study_unique_assignment_key = self._assignment_key("democrat", "control")
 
         # Act
         counter = compare_and_increment_assignment_counter(
@@ -317,7 +345,7 @@ class TestCompareAndIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     def test_compare_and_increment_conflict_raises(self) -> None:
         """Stale expected counter raises AssignmentCounterConflictError."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("gamma", "treatment")
+        study_unique_assignment_key = self._assignment_key("republican", "training_assisted")
         self._seed_counter_row(study_unique_assignment_key=study_unique_assignment_key, counter=2)
 
         # Act / Assert
@@ -337,7 +365,7 @@ class TestCompareAndIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
     def test_compare_and_increment_after_refresh(self) -> None:
         """Fresh expected counter increments successfully."""
         # Arrange
-        study_unique_assignment_key = self._assignment_key("gamma", "refresh")
+        study_unique_assignment_key = self._assignment_key("democrat", "training_assisted")
         self._seed_counter_row(study_unique_assignment_key=study_unique_assignment_key, counter=3)
 
         # Act
@@ -363,6 +391,7 @@ TEST_CLASSES = [
 
 
 def _iter_test_methods(test_instance) -> list[str]:
+    """Return sorted test method names for a test instance."""
     methods = [
         name
         for name in dir(test_instance)
@@ -372,6 +401,14 @@ def _iter_test_methods(test_instance) -> list[str]:
 
 
 def run_smoke_tests() -> int:
+    """Run all smoke tests with setup/teardown and aggregated reporting.
+
+    Algorithm:
+    1. For each test class, instantiate it and discover `test_*` methods.
+    2. For each method, run `setup()` -> test method -> `teardown()` in a
+       try/finally block so cleanup runs even on failure.
+    3. Track failures by fully qualified name and print a summary.
+    """
     failed: set[str] = set()
     total_methods = sum(len(_iter_test_methods(cls())) for cls in TEST_CLASSES)
     for test_class in TEST_CLASSES:
@@ -400,6 +437,7 @@ def run_smoke_tests() -> int:
 
 
 def main() -> None:
+    """Entry point for manual execution."""
     raise SystemExit(run_smoke_tests())
 
 
