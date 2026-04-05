@@ -2,12 +2,25 @@
 
 Threaded load harness for `lambdas/get_study_assignment/handler.py`.
 
+Run commands from the **repository root** with `PYTHONPATH=.` so `lambdas` and `lib` import correctly.
+
+## Shared environment
+
+Required for **local** and **docker** backends (the harness hits DynamoDB and S3 like smoke tests):
+
+- `AWS_REGION`
+- `USER_ASSIGNMENTS_TABLE_NAME`
+- `STUDY_ASSIGNMENT_COUNTER_TABLE_NAME`
+
+Use the same AWS credentials you use for normal development (profile, env vars, or instance role).
+
 ## Run
 
-From repo root:
-
 ```bash
-uv run python -m lambdas.get_study_assignment.load_tests.run_handler_load_tests \
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  uv run python -m lambdas.get_study_assignment.load_tests.run_handler_load_tests \
   --backend local \
   --users 5 \
   --ramp-seconds 2 \
@@ -19,7 +32,10 @@ uv run python -m lambdas.get_study_assignment.load_tests.run_handler_load_tests 
 Equivalent script path:
 
 ```bash
-uv run python lambdas/get_study_assignment/load_tests/run_handler_load_tests.py \
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  uv run python lambdas/get_study_assignment/load_tests/run_handler_load_tests.py \
   --backend local --users 5 --ramp-seconds 2 --scenario random --seed 42
 ```
 
@@ -55,7 +71,10 @@ When `--report-dir` is provided, the harness writes:
 After small checks pass, run one operator-led stress slice with default users:
 
 ```bash
-uv run python -m lambdas.get_study_assignment.load_tests.run_handler_load_tests \
+PYTHONPATH=. AWS_REGION=us-east-2 \
+  USER_ASSIGNMENTS_TABLE_NAME=user_assignments \
+  STUDY_ASSIGNMENT_COUNTER_TABLE_NAME=study_assignment_counter \
+  uv run python -m lambdas.get_study_assignment.load_tests.run_handler_load_tests \
   --backend local \
   --ramp-seconds 120 \
   --scenario random \
