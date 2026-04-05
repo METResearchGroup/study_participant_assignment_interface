@@ -1,6 +1,14 @@
 variable "lambda_image_uri" {
-  description = "Full ECR image URI (tag or digest) for the get_study_assignment container image. Required when creating or updating the Lambda."
+  description = "Optional full ECR image URI (tag or digest). If null, the Lambda uses aws_ecr_repository.repository_url + \":\" + lambda_image_tag."
   type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "lambda_image_tag" {
+  description = "Image tag when lambda_image_uri is null (e.g. latest)."
+  type        = string
+  default     = "latest"
 }
 
 variable "lambda_function_name" {

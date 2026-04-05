@@ -130,6 +130,13 @@ resource "aws_ecr_repository" "get_study_assignment" {
   }
 }
 
+locals {
+  lambda_image_uri_effective = coalesce(
+    var.lambda_image_uri,
+    "${aws_ecr_repository.get_study_assignment.repository_url}:${var.lambda_image_tag}"
+  )
+}
+
 resource "aws_iam_role" "get_study_assignment_lambda" {
   name               = "${var.lambda_function_name}-lambda"
   assume_role_policy = data.aws_iam_policy_document.get_study_assignment_lambda_assume.json
@@ -145,7 +152,7 @@ resource "aws_lambda_function" "get_study_assignment" {
   function_name = var.lambda_function_name
   role          = aws_iam_role.get_study_assignment_lambda.arn
   package_type  = "Image"
-  image_uri     = var.lambda_image_uri
+  image_uri     = local.lambda_image_uri_effective
 
   memory_size = var.lambda_memory_size
 
