@@ -10,6 +10,7 @@ from jobs.mirrorview.constants import (
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lib.dynamodb import (
     AssignmentCounterConflictError,
+    StudyAssignmentCounterRecord,
     UserAssignmentPayload,
     UserAssignmentRecord,
     compare_and_increment_assignment_counter,
@@ -44,8 +45,59 @@ def get_user_assignment_record_if_exists(
     return user_assignment_record
 
 
-# basically, we (1) iterate the DynamoDB counter, and then (2) we
-# determine the assignment ID.
+def select_least_assignment_party_condition_key(
+    *,
+    study_id: str,
+    study_iteration_id: str,
+    political_party: str,
+) -> tuple[str, int]:
+    """Select the least assignment party condition key for a given study,
+    iteration, and party. Reads from DynamoDB and returns both the key
+    and the expected counter value for the key.
+
+    We return the expected counter value for the key because we need to
+    increment the counter after we've selected the key and we have to verify
+    that the counter hasn't changed since we read it.
+    """
+    party_counter_records: list[StudyAssignmentCounterRecord] = list_assignment_counters_for_party(
+        study_id=study_id,
+        study_iteration_id=study_iteration_id,
+        political_party=political_party,
+        table_name=study_assignment_counter_table_name,
+        region_name=region_name,
+    )
+    # output is, e.g,. {"democrat:control": 5, "democrat:training_assisted": 3},
+    # giving the counts for each party x condition combination, for the given
+    # study_id and study_iteration_id.
+    key_to_counter: dict[str, int] = {
+        record.study_unique_assignment_key: int(record.counter) for record in party_counter_records
+    }
+    # filtering for the party that we care about.
+    # e.g., input = {"democrat:control": 5, "democrat:training_assisted": 3, "republican:control": 2, "republican:training_assisted": 4}, # noqa
+    # output (if party=democrat) = {"democrat:control": 5, "democrat:training_assisted": 3}
+    key_to_counter = {
+        key: counter
+        for key, counter in key_to_counter.items()
+        if key.startswith(f"{political_party}:") and ":" in key
+    }
+
+    # get all possibly party x condition keys available
+    all_candidate_keys: list[str] = sorted(
+        set(key_to_counter.keys())
+        | {f"{political_party}:{condition}" for condition in DEFAULT_STUDY_CONDITIONS}
+    )
+    if not all_candidate_keys:
+        raise ValueError(f"No candidate assignment keys for political_party={political_party!r}")
+
+    # Choose the currently smallest cell; tie-break by key for determinism.
+    selected_unique_key = min(
+        all_candidate_keys,
+        key=lambda key: (key_to_counter.get(key, 0), key),
+    )
+    expected_counter = key_to_counter.get(selected_unique_key, 0)
+    return selected_unique_key, expected_counter
+
+
 def assign_user_to_condition(
     *,
     study_id: str,
@@ -67,41 +119,16 @@ def assign_user_to_condition(
     here in case it indeed does happen.
     """
     for _ in range(MAX_ASSIGNMENT_RETRIES):
-        existing_records = list_assignment_counters_for_party(
-            study_id=study_id,
-            study_iteration_id=study_iteration_id,
-            political_party=political_party,
-            table_name=study_assignment_counter_table_name,
-            region_name=region_name,
-        )
-        key_to_counter: dict[str, int] = {
-            record.study_unique_assignment_key: int(record.counter) for record in existing_records
-        }
-        key_to_counter = {
-            key: counter
-            for key, counter in key_to_counter.items()
-            if key.startswith(f"{political_party}:") and ":" in key
-        }
-        all_candidate_keys: list[str] = sorted(
-            set(key_to_counter.keys())
-            | {f"{political_party}:{condition}" for condition in DEFAULT_STUDY_CONDITIONS}
-        )
-        if not all_candidate_keys:
-            raise ValueError(
-                f"No candidate assignment keys for political_party={political_party!r}"
-            )
-
-        # Choose the currently smallest cell; tie-break by key for determinism.
-        selected_unique_key = min(
-            all_candidate_keys,
-            key=lambda key: (key_to_counter.get(key, 0), key),
-        )
-        expected_counter = key_to_counter.get(selected_unique_key, 0)
         try:
+            selected_assignment_key, expected_counter = select_least_assignment_party_condition_key(
+                study_id=study_id,
+                study_iteration_id=study_iteration_id,
+                political_party=political_party,
+            )
             total_in_condition = compare_and_increment_assignment_counter(
                 study_id=study_id,
                 study_iteration_id=study_iteration_id,
-                study_unique_assignment_key=selected_unique_key,
+                study_unique_assignment_key=selected_assignment_key,
                 expected_counter=expected_counter,
                 table_name=study_assignment_counter_table_name,
                 region_name=region_name,
@@ -109,7 +136,7 @@ def assign_user_to_condition(
         except AssignmentCounterConflictError:
             continue
 
-        condition = selected_unique_key.split(":", 1)[1]
+        condition = selected_assignment_key.split(":", 1)[1]
         return {"condition": condition, "total_in_condition": total_in_condition}
 
     raise RuntimeError(
