@@ -161,9 +161,6 @@ def get_latest_uploaded_precomputed_assignments_s3_key(
     return sorted(relevant_precomputed_keys, reverse=True)[0]
 
 
-# TODO: gotta think through how to set this logic...
-# TODO: also, for test e2e runs, don't forget to prepend the study_iteration_id
-# with "test_" or "dev_"
 def set_user_assignment_record(
     *,
     study_id: str,
@@ -189,8 +186,11 @@ def set_user_assignment_record(
     assignment_id: str = generate_single_assignment_id(
         political_party=political_party,
         condition=assigned_condition,
-        # DynamoDB counters are 1-based after increment; assignment IDs are 0-based.
-        index=total_in_condition - 1,
+        # This'll be an off-by-1 idea, as we assign them based on the post-increment
+        # counter, but this means that we'll never have a '-000' assignment ID
+        # since we'll start with '-001'. This is OK, as we intentionally
+        # overprovision. We should never run out of assignment IDs.
+        index=total_in_condition,
     )
     metadata: dict[str, str] = {
         "political_party": political_party,
