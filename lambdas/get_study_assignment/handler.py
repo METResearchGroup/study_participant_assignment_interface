@@ -176,8 +176,6 @@ def set_user_assignment_record(
     )
     assigned_condition = assigned_condition_dict["condition"]
     total_in_condition = assigned_condition_dict["total_in_condition"]
-    if total_in_condition <= 0:
-        raise ValueError(f"Invalid counter for assignment generation: {total_in_condition!r}")
 
     assignment_id: str = generate_single_assignment_id(
         political_party=political_party,
