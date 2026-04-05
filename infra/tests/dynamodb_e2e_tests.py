@@ -129,6 +129,8 @@ class DynamoDbSmokeTestBase:
 
 
 class TestUserAssignmentSmoke(DynamoDbSmokeTestBase):
+    """Smoke tests for user assignment read/write round-trips."""
+
     def test_put_and_get_user_assignment(self) -> None:
         """Round-trip user assignment payload storage and retrieval."""
         # Arrange
@@ -187,6 +189,8 @@ class TestUserAssignmentSmoke(DynamoDbSmokeTestBase):
 
 
 class TestIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
+    """Smoke tests for increment-on-miss and increment sequencing."""
+
     def test_first_increment_returns_one(self) -> None:
         """First increment on a missing key returns 1."""
         # Arrange
@@ -259,6 +263,8 @@ class TestIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
 
 
 class TestListAssignmentCountersForPartySmoke(DynamoDbSmokeTestBase):
+    """Smoke tests for party-based counter listing and filtering."""
+
     def test_list_filters_by_party_prefix(self) -> None:
         """Listing returns only counters for the requested party."""
         # Arrange
@@ -288,6 +294,8 @@ class TestListAssignmentCountersForPartySmoke(DynamoDbSmokeTestBase):
 
 
 class TestCompareAndIncrementAssignmentCounterSmoke(DynamoDbSmokeTestBase):
+    """Smoke tests for compare-and-increment conflict and success paths."""
+
     def test_compare_and_increment_on_missing(self) -> None:
         """Compare-and-increment on missing row with expected 0 returns 1."""
         # Arrange
