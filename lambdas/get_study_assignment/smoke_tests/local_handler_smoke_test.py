@@ -119,7 +119,10 @@ class HandlerSmokeTestBase:
         last_key = None
         key_condition = Key("study_id").eq(self.study_id) & Key(sort_key).begins_with(sort_prefix)
         while True:
-            query_kwargs = {"KeyConditionExpression": key_condition}
+            query_kwargs = {
+                "KeyConditionExpression": key_condition,
+                "ConsistentRead": True,
+            }
             if last_key:
                 query_kwargs["ExclusiveStartKey"] = last_key
             response = table.query(**query_kwargs)
