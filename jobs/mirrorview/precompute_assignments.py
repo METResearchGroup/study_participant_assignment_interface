@@ -47,7 +47,7 @@ POST_CATEGORIES = [
     "right__sample_middle_toxicity",
 ]
 POLITICAL_PARTIES = ["democrat", "republican"]
-STUDY_CONDITIONS = ["control", "training_assisted"]
+STUDY_CONDITIONS = ["control", "training", "training_assisted"]
 
 # Single generator for the whole batch run so draws are reproducible for a given seed.
 RANDOM_SEED = 42

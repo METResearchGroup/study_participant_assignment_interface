@@ -312,7 +312,7 @@ class TestGenerateAndExportPrecomputedAssignments:
         mock_write.assert_called_once()
         call_kw = mock_write.call_args.kwargs
         assignments = call_kw["assignments"]
-        expected_ids = ["democrat-control-0001", "democrat-control-0002"]
+        expected_ids = ["democrat-control-0000", "democrat-control-0001"]
         assert assignments["id"].tolist() == expected_ids
         assert assignments["political_party"].tolist() == ["democrat", "democrat"]
         assert assignments["condition"].tolist() == ["control", "control"]

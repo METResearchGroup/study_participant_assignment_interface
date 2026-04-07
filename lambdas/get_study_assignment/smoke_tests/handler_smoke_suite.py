@@ -105,6 +105,10 @@ class HandlerSmokeTestBase:
                 political_party=political_party,
                 condition="control",
             ),
+            "training": self._seed_precomputed_csv(
+                political_party=political_party,
+                condition="training",
+            ),
             "training_assisted": self._seed_precomputed_csv(
                 political_party=political_party,
                 condition="training_assisted",
@@ -252,21 +256,19 @@ class TestHandlerSmokeSuite(HandlerSmokeTestBase):
         )
 
     def test_balance_across_conditions_same_party(self) -> None:
-        """**Least-populated cell** selection for the same party across two new users.
+        """**Least-populated cell** selection for the same party across three new users.
 
-        The first time we run the handler (new democrat user, empty counters),
-        we expect `control` and the post IDs from the seeded democrat/control
-        CSV row for assignment index 1.
-
-        The second time we run the handler (another new democrat user), we expect
-        `training_assisted` and the post IDs from the seeded democrat/training_assisted
-        CSV row for assignment index 1, because `control` already received one assignment.
+        With empty counters, deterministic tie-break picks `control`, then `training`,
+        then `training_assisted` (lexicographic order on `party:condition` keys at equal count).
         """
         self._seed_party_condition_fixtures("democrat")
         first_event = self._make_event(
             prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat"
         )
         second_event = self._make_event(
+            prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat"
+        )
+        third_event = self._make_event(
             prolific_id=f"user-{uuid.uuid4().hex}", political_party="democrat"
         )
 
@@ -280,16 +282,29 @@ class TestHandlerSmokeSuite(HandlerSmokeTestBase):
         }
         expected_second_response = {
             "assigned_post_ids": [
+                "democrat-training-post-1-a",
+                "democrat-training-post-1-b",
+            ],
+            "already_assigned": True,
+            "condition": "training",
+        }
+        expected_third_response = {
+            "assigned_post_ids": [
                 "democrat-training_assisted-post-1-a",
                 "democrat-training_assisted-post-1-b",
             ],
             "already_assigned": True,
             "condition": "training_assisted",
         }
-        expected_counters = {"democrat:control": 1, "democrat:training_assisted": 1}
+        expected_counters = {
+            "democrat:control": 1,
+            "democrat:training": 1,
+            "democrat:training_assisted": 1,
+        }
 
         first_response = self.invoke_handler(first_event)
         second_response = self.invoke_handler(second_event)
+        third_response = self.invoke_handler(third_event)
 
         _assert_equal(
             first_response,
@@ -299,7 +314,12 @@ class TestHandlerSmokeSuite(HandlerSmokeTestBase):
         _assert_equal(
             second_response,
             expected_second_response,
-            "second user should get democrat training_assisted row for assignment index 1",
+            "second user should get democrat training row for assignment index 1",
+        )
+        _assert_equal(
+            third_response,
+            expected_third_response,
+            "third user should get democrat training_assisted row for assignment index 1",
         )
 
         counters = {

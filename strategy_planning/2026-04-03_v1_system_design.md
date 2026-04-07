@@ -92,6 +92,7 @@ Create local precomputation of the records for the pilot. Verification = batch j
         control/
             assignments.json
             metadata.json # contains any metadata about the assignments. Still unsure what we should put here.
+        training/
         training_assisted/
     republican/
     metadata.json # a file with metadata about the precomputed generation.
@@ -126,9 +127,9 @@ NOTE: need to verify the condition names.
 
 Let's store the random assignments in a single .json file. This helps us avoid the "many small files" problem that we get in S3, where we are charged on the number of file reads (and also number of encryptions/decryptions).
 
-Right now, Billy is thinking of whether we should have 2 or 3 conditions. Since the spec currently only has 2 conditions, let's go with that for now.
+Runtime uses three conditions: `control`, `training`, and `training_assisted` (see precompute and Lambda defaults).
 
-We probably want something like minimum 500 per cell, since we have a 2 (republican/democrat) x 2 (control/training-assisted). To be safe, let's do 1,000 per cell (assignment is inexpensive and extra storage is at the level of KBs).
+We probably want something like minimum 500 per cell, since we have a 2 (republican/democrat) x 3 (control / training / training-assisted). To be safe, let's do 1,000 per cell (assignment is inexpensive and extra storage is at the level of KBs).
 
 Each row should be idempotent on the ID. We care about idempotency only at the level of the given JSON. The batch folders serve as their own primary identifier.
 

@@ -24,7 +24,7 @@ user_assignments_table_name = "user_assignments"
 study_assignment_counter_table_name = "study_assignment_counter"
 region_name = "us-east-2"
 MAX_ASSIGNMENT_RETRIES = 5
-DEFAULT_STUDY_CONDITIONS = ("control", "training_assisted")
+DEFAULT_STUDY_CONDITIONS = ("control", "training", "training_assisted")
 
 s3 = S3(bucket=DEFAULT_BUCKET)
 
@@ -146,6 +146,14 @@ def assign_user_to_condition(
     )
 
 
+def _precomputed_assignments_s3_key_matches_party_condition(
+    key: str, *, political_party: str, condition: str
+) -> bool:
+    """True if key ends with `/{party}/{condition}/` + OUTPUT_RECORDS_FILENAME."""
+    suffix = f"/{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
+    return key.endswith(suffix)
+
+
 def get_latest_uploaded_precomputed_assignments_s3_key(
     political_party: str,
     condition: str,
@@ -156,7 +164,9 @@ def get_latest_uploaded_precomputed_assignments_s3_key(
     relevant_precomputed_keys: list[str] = [
         key
         for key in precomputed_keys
-        if political_party in key and condition in key and key.endswith(OUTPUT_RECORDS_FILENAME)
+        if _precomputed_assignments_s3_key_matches_party_condition(
+            key, political_party=political_party, condition=condition
+        )
     ]
     if not relevant_precomputed_keys:
         raise ValueError(

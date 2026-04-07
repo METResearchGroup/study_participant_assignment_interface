@@ -101,6 +101,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
         # Arrange
         records = [
             MagicMock(study_unique_assignment_key="democrat:control", counter=5),
+            MagicMock(study_unique_assignment_key="democrat:training", counter=5),
             MagicMock(study_unique_assignment_key="democrat:training_assisted", counter=2),
         ]
         with patch.object(h, "list_assignment_counters_for_party", return_value=records):
@@ -121,6 +122,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
         records = [
             MagicMock(study_unique_assignment_key="democrat:training_assisted", counter=3),
             MagicMock(study_unique_assignment_key="democrat:control", counter=3),
+            MagicMock(study_unique_assignment_key="democrat:training", counter=3),
         ]
         with patch.object(h, "list_assignment_counters_for_party", return_value=records):
             # Act
@@ -147,7 +149,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
             )
 
         # Assert
-        expected = ("democrat:training_assisted", 0)
+        expected = ("democrat:training", 0)
         assert result == expected
 
     def test_select_least_key_filters_non_matching_party_keys(self):
@@ -155,8 +157,10 @@ class TestSelectLeastAssignmentPartyConditionKey:
         # Arrange
         records = [
             MagicMock(study_unique_assignment_key="democrat:control", counter=8),
+            MagicMock(study_unique_assignment_key="democrat:training", counter=5),
             MagicMock(study_unique_assignment_key="democrat:training_assisted", counter=1),
             MagicMock(study_unique_assignment_key="republican:control", counter=1),
+            MagicMock(study_unique_assignment_key="republican:training", counter=1),
             MagicMock(study_unique_assignment_key="republican:training_assisted", counter=1),
         ]
         with patch.object(h, "list_assignment_counters_for_party", return_value=records):
@@ -320,6 +324,39 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
 
         # Assert
         expected = "precomputed_assignments/2026-01-01/democrat/control/assignments.csv"
+        assert result == expected
+
+    def test_get_latest_uploaded_precomputed_assignments_s3_key_training_not_training_assisted(
+        self,
+    ):
+        """`condition=training` must not match keys under .../training_assisted/..."""
+        keys = [
+            "precomputed_assignments/2026-01-01/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026-01-02/democrat/training/assignments.csv",
+        ]
+        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
+            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
+                political_party="democrat",
+                condition="training",
+            )
+        expected = "precomputed_assignments/2026-01-02/democrat/training/assignments.csv"
+        assert result == expected
+
+    def test_get_latest_uploaded_precomputed_assignments_s3_key_training_assisted_exact_segment(
+        self,
+    ):
+        """`condition=training_assisted` matches only the assisted path when both exist."""
+        keys = [
+            "precomputed_assignments/2026-01-01/democrat/training/assignments.csv",
+            "precomputed_assignments/2026-01-03/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026-01-02/democrat/training_assisted/assignments.csv",
+        ]
+        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
+            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
+                political_party="democrat",
+                condition="training_assisted",
+            )
+        expected = "precomputed_assignments/2026-01-03/democrat/training_assisted/assignments.csv"
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_no_match(self):
