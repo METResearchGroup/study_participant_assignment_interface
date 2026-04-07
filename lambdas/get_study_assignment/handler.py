@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pandas as pd
 
@@ -19,6 +20,7 @@ from lib.dynamodb import (
     put_user_assignment,
 )
 from lib.s3 import S3
+from lib.timestamp_utils import CREATED_AT_FORMAT
 
 user_assignments_table_name = "user_assignments"
 study_assignment_counter_table_name = "study_assignment_counter"
@@ -154,6 +156,27 @@ def _precomputed_assignments_s3_key_matches_party_condition(
     return key.endswith(suffix)
 
 
+def _precomputed_assignments_batch_root_segment(key: str) -> str | None:
+    """First path segment after DEFAULT_S3_PREFIX (the batch folder name), or None."""
+    prefix_with_slash = f"{DEFAULT_S3_PREFIX}/"
+    if not key.startswith(prefix_with_slash):
+        return None
+    remainder = key.removeprefix(prefix_with_slash)
+    if not remainder:
+        return None
+    first_segment, _, _ = remainder.partition("/")
+    return first_segment or None
+
+
+def _is_production_precomputed_batch_root(root: str) -> bool:
+    """True if root parses as the shared batch / created-at timestamp contract."""
+    try:
+        datetime.strptime(root, CREATED_AT_FORMAT)
+    except ValueError:
+        return False
+    return True
+
+
 def get_latest_uploaded_precomputed_assignments_s3_key(
     political_party: str,
     condition: str,
@@ -174,7 +197,21 @@ def get_latest_uploaded_precomputed_assignments_s3_key(
             f"political_party={political_party!r}, condition={condition!r} "
             f"(prefix={DEFAULT_S3_PREFIX!r}, filename suffix={OUTPUT_RECORDS_FILENAME!r})"
         )
-    return sorted(relevant_precomputed_keys, reverse=True)[0]
+    production_keys: list[str] = [
+        key
+        for key in relevant_precomputed_keys
+        if (
+            (root := _precomputed_assignments_batch_root_segment(key)) is not None
+            and _is_production_precomputed_batch_root(root)
+        )
+    ]
+    if not production_keys:
+        raise ValueError(
+            "No production precomputed assignment key matched "
+            f"political_party={political_party!r}, condition={condition!r} "
+            f"(prefix={DEFAULT_S3_PREFIX!r}, filename suffix={OUTPUT_RECORDS_FILENAME!r})"
+        )
+    return sorted(production_keys, reverse=True)[0]
 
 
 def set_user_assignment_record(
