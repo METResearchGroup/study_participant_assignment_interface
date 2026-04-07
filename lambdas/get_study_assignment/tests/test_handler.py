@@ -291,9 +291,9 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
         """Test reverse lexical sort picks latest matching key."""
         # Arrange
         keys = [
-            "precomputed_assignments/2026-01-01/democrat/control/assignments.csv",
-            "precomputed_assignments/2026-01-03/democrat/control/assignments.csv",
-            "precomputed_assignments/2026-01-02/democrat/control/assignments.csv",
+            "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv",
+            "precomputed_assignments/2026_01_03-00:00:00/democrat/control/assignments.csv",
+            "precomputed_assignments/2026_01_02-00:00:00/democrat/control/assignments.csv",
         ]
         with patch.object(h.s3, "list_keys_ordered", return_value=keys):
             # Act
@@ -303,17 +303,17 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
             )
 
         # Assert
-        expected = "precomputed_assignments/2026-01-03/democrat/control/assignments.csv"
+        expected = "precomputed_assignments/2026_01_03-00:00:00/democrat/control/assignments.csv"
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_ignores_irrelevant_keys(self):
         """Test keys for other party, condition, or filename are excluded."""
         # Arrange
         keys = [
-            "precomputed_assignments/2026-01-02/republican/control/assignments.csv",
-            "precomputed_assignments/2026-01-03/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026-01-04/democrat/control/not_assignments.txt",
-            "precomputed_assignments/2026-01-01/democrat/control/assignments.csv",
+            "precomputed_assignments/2026_01_02-00:00:00/republican/control/assignments.csv",
+            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026_01_04-00:00:00/democrat/control/not_assignments.txt",
+            "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv",
         ]
         with patch.object(h.s3, "list_keys_ordered", return_value=keys):
             # Act
@@ -323,7 +323,7 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
             )
 
         # Assert
-        expected = "precomputed_assignments/2026-01-01/democrat/control/assignments.csv"
+        expected = "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv"
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_training_not_training_assisted(
@@ -331,15 +331,15 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
     ):
         """`condition=training` must not match keys under .../training_assisted/..."""
         keys = [
-            "precomputed_assignments/2026-01-01/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026-01-02/democrat/training/assignments.csv",
+            "precomputed_assignments/2026_01_01-00:00:00/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026_01_02-00:00:00/democrat/training/assignments.csv",
         ]
         with patch.object(h.s3, "list_keys_ordered", return_value=keys):
             result = h.get_latest_uploaded_precomputed_assignments_s3_key(
                 political_party="democrat",
                 condition="training",
             )
-        expected = "precomputed_assignments/2026-01-02/democrat/training/assignments.csv"
+        expected = "precomputed_assignments/2026_01_02-00:00:00/democrat/training/assignments.csv"
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_training_assisted_exact_segment(
@@ -347,16 +347,18 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
     ):
         """`condition=training_assisted` matches only the assisted path when both exist."""
         keys = [
-            "precomputed_assignments/2026-01-01/democrat/training/assignments.csv",
-            "precomputed_assignments/2026-01-03/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026-01-02/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026_01_01-00:00:00/democrat/training/assignments.csv",
+            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv",
+            "precomputed_assignments/2026_01_02-00:00:00/democrat/training_assisted/assignments.csv",
         ]
         with patch.object(h.s3, "list_keys_ordered", return_value=keys):
             result = h.get_latest_uploaded_precomputed_assignments_s3_key(
                 political_party="democrat",
                 condition="training_assisted",
             )
-        expected = "precomputed_assignments/2026-01-03/democrat/training_assisted/assignments.csv"
+        expected = (
+            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv"
+        )
         assert result == expected
 
     def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_no_match(self):
@@ -370,6 +372,41 @@ class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
                     condition="control",
                 )
         assert "control" in str(exc_info.value)
+
+    def test_get_latest_uploaded_precomputed_assignments_s3_key_prefers_prod_over_handler_smoke(
+        self,
+    ):
+        """Regression: ~handler-smoke roots must not outrank timestamp production batches."""
+        keys = [
+            "precomputed_assignments/~handler-smoke/local-smoke_2026_04_07-06:27:21_dd44c791/"
+            "democrat/training/assignments.csv",
+            "precomputed_assignments/2026_04_03-09:36:03/democrat/training/assignments.csv",
+            "precomputed_assignments/2026_04_07-06:17:02/democrat/training/assignments.csv",
+        ]
+        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
+            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
+                political_party="democrat",
+                condition="training",
+            )
+        expected = "precomputed_assignments/2026_04_07-06:17:02/democrat/training/assignments.csv"
+        assert result == expected
+
+    def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_only_smoke_matches(
+        self,
+    ):
+        """If only non-production batch folders match, fail with a production-specific error."""
+        keys = [
+            "precomputed_assignments/~handler-smoke/local-smoke_2026_04_07-06:27:21_dd44c791/"
+            "democrat/training/assignments.csv",
+        ]
+        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
+            with pytest.raises(
+                ValueError, match="No production precomputed assignment key matched"
+            ):
+                h.get_latest_uploaded_precomputed_assignments_s3_key(
+                    political_party="democrat",
+                    condition="training",
+                )
 
 
 class TestSetUserAssignmentRecord:
