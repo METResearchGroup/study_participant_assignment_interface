@@ -246,7 +246,29 @@ The image-based Lambda is **x86_64** in this stack (`architectures` in `infra/ma
 
 The push script **`scripts/build_and_push_lambda_image_to_ecr.sh`** uses **`docker buildx build`** with default **`linux/amd64`**, aligned with x86_64 Lambda. If you move the function to Graviton (**arm64**), set **`DOCKER_PLATFORM=linux/arm64`** or pass **`--platform linux/arm64`** when running the script, and set Terraform **`architectures = ["arm64"]`** to match.
 
+### One-command deploy (build, push, and roll Lambda by digest)
+
+The wrapper **`scripts/deploy_get_study_assignment_lambda_image.sh`** automates the full path that the manual subsections below spell out: it runs **`build_and_push_lambda_image_to_ecr.sh`** (with **`AWS_REGION=us-east-2`** hard-coded in the script), resolves the **`:latest`** image **digest** in ECR, runs **`aws lambda update-function-code`** with **`repository@digest`**, **`aws lambda wait function-updated-v2`**, then **`terraform -chdir=infra apply -auto-approve -input=false -var="lambda_image_uri=..."`** so **state matches production**. Use this for routine code deploys.
+
+From the **repository root**, with Terraform initialized under **`infra/`**:
+
+```bash
+./scripts/deploy_get_study_assignment_lambda_image.sh
+```
+
+Optional **`--platform`** (and other flags) are forwarded to **`build_and_push_lambda_image_to_ecr.sh`**, for example:
+
+```bash
+./scripts/deploy_get_study_assignment_lambda_image.sh --platform linux/arm64
+```
+
+The script reads **`ecr_repository_url`**, **`ecr_repository_name`**, and **`lambda_function_name`** from **`terraform -chdir=infra output`**. Override the Terraform directory with **`TERRAFORM_CHDIR`** if needed.
+
+The following sections remain the detailed reference for partial steps, debugging, and Terraform-only workflows.
+
 ### Push commands
+
+**Note:** Pushing alone is only half of a **deploy** if you need the live Lambda to run the new image and Terraform to record it; **`scripts/deploy_get_study_assignment_lambda_image.sh`** already automates **push + digest-pinned `update-function-code` + wait + `terraform apply` with `lambda_image_uri`** ([One-command deploy](#one-command-deploy-build-push-and-roll-lambda-by-digest)). Use this subsection when you only want to push, or to understand the underlying commands.
 
 After the ECR repository exists, build from the **repository root** and push `latest` plus an immutable tag (short `git` SHA, or a UTC timestamp if not in a git checkout):
 
@@ -274,6 +296,8 @@ You should see `latest` and the immutable tag from the script output. Then run *
 
 ### Rolling the function after pushing `:latest`
 
+If you already ran **`./scripts/deploy_get_study_assignment_lambda_image.sh`** ([One-command deploy](#one-command-deploy-build-push-and-roll-lambda-by-digest)), you have already performed this roll **and** synced Terraform state; the commands below are for **manual** runs, troubleshooting, or copying into other automation.
+
 Terraform’s `image_uri` string may stay `...:latest` with **no plan diff** after a new push to ECR, so Lambda can keep running the previous image. To force the function to use the new image immediately, update by **digest** (recommended):
 
 ```bash
@@ -298,7 +322,7 @@ aws lambda wait function-updated-v2 \
 
 **Terraform alternative:** `terraform -chdir=infra apply -var="lambda_image_uri=${REPO}@${DIGEST}"` (or a unique tag) so state matches production.
 
-**Out of scope in this runbook:** production `aws lambda invoke` smoke tests; digest-pinned deploy automation (see project planning docs).
+**Automation:** **`scripts/deploy_get_study_assignment_lambda_image.sh`** performs digest-pinned **`update-function-code`** and **`terraform apply -var="lambda_image_uri=..."`** together. For **CI**, invoke the same script or replicate its steps. Production **`aws lambda invoke`** smoke tests remain a separate manual or CI step.
 
 ## Smoke Test
 
