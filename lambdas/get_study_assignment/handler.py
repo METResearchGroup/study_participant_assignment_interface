@@ -20,6 +20,7 @@ from lib.dynamodb import (
     put_user_assignment,
 )
 from lib.s3 import S3
+from lib.timestamp_utils import CREATED_AT_FORMAT
 
 user_assignments_table_name = "user_assignments"
 study_assignment_counter_table_name = "study_assignment_counter"
@@ -168,9 +169,9 @@ def _precomputed_assignments_batch_root_segment(key: str) -> str | None:
 
 
 def _is_production_precomputed_batch_root(root: str) -> bool:
-    """True if root matches uploaded batch folders: YYYY_MM_DD-HH:MM:SS."""
+    """True if root parses as the shared batch / created-at timestamp contract."""
     try:
-        datetime.strptime(root, "%Y_%m_%d-%H:%M:%S")
+        datetime.strptime(root, CREATED_AT_FORMAT)
     except ValueError:
         return False
     return True
