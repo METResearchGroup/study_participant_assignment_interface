@@ -2,11 +2,13 @@
 
 Layout under `precomputed_assignments/<iteration>/`:
 
+    config.yaml
     democrat/control/assignments.csv
     democrat/training_assisted/assignments.csv
     ...
 
-    PYTHONPATH=. uv run python -m jobs.mirrorview.upload_precomputed_data_to_s3 \
+    PYTHONPATH=. uv run python -m jobs.mirrorview.upload_precomputed_data_to_s3 \\
+        --config jobs/mirrorview/config/default.yaml \\
         --path data/mirrorview/2026_04_03-09:36:03
 """
 
@@ -15,51 +17,77 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, LOCAL_DATA_PREFIX
+from jobs.mirrorview.config_loader import (
+    MirrorViewConfig,
+    load_mirrorview_config,
+    resolve_repo_path,
+)
 from lib.s3 import S3
 
 
-def _iter_files(batch_root: Path) -> list[Path]:
-    files = sorted(p for p in batch_root.rglob("*") if p.is_file())
-    return [p for p in files if p.suffix.lower() == ".csv"]
-
-
-def _validate_local_path(local_path: Path) -> None:
+def _validate_local_path(local_path: Path, *, local_data_root: Path) -> None:
     if not local_path.is_dir():
         raise NotADirectoryError(f"Not a directory: {local_path}")
     if not local_path.exists():
         raise FileNotFoundError(f"Directory does not exist: {local_path}")
-    # Check if the provided local_path starts with LOCAL_DATA_PREFIX
     local_path_str = str(local_path.resolve())
-    local_data_prefix_str = str(LOCAL_DATA_PREFIX.resolve())
+    local_data_prefix_str = str(local_data_root.resolve())
     if not local_path_str.startswith(local_data_prefix_str):
         raise ValueError(f"Path {local_path_str} does not start with {local_data_prefix_str}")
 
 
-def upload_batch(local_batch_dir: Path) -> None:
-    _validate_local_path(local_batch_dir)
-    files = _iter_files(local_batch_dir)
-    bucket = DEFAULT_BUCKET
+def _validate_expected_csvs_exist(local_batch_dir: Path, config: MirrorViewConfig) -> None:
+    missing: list[str] = []
+    for relative_path in config.expected_relative_csv_paths():
+        if not (local_batch_dir / relative_path).is_file():
+            missing.append(relative_path)
+    if missing:
+        raise FileNotFoundError(
+            f"Missing configured assignment CSVs under {local_batch_dir}: {missing}"
+        )
+
+
+def upload_batch(
+    local_batch_dir: Path,
+    *,
+    config: MirrorViewConfig,
+    config_source_path: Path,
+) -> None:
+    local_data_root = resolve_repo_path(config.local_data_dir)
+    _validate_local_path(local_batch_dir, local_data_root=local_data_root)
+    _validate_expected_csvs_exist(local_batch_dir, config)
+
+    bucket = config.s3.bucket
     store = S3(bucket=bucket)
 
-    # Extract the path part after LOCAL_DATA_PREFIX for S3 key prefixing
-    timestamp_dir = str(local_batch_dir.relative_to(LOCAL_DATA_PREFIX))
+    timestamp_dir = str(local_batch_dir.relative_to(local_data_root))
+    s3_base_prefix = f"{config.s3.prefix.rstrip('/')}/{timestamp_dir}"
 
-    s3_base_prefix = f"{DEFAULT_S3_PREFIX}/{timestamp_dir}"
-
-    for path in files:
-        # grabs, e.g., 'democrat/control/assignments.csv'
-        relative_fp: str = str(path.relative_to(local_batch_dir))
-        key: str = f"{s3_base_prefix}/{relative_fp}"
-        print(f"Uploading {relative_fp} -> s3://{bucket}/{key}")
+    for relative_path in config.expected_relative_csv_paths():
+        path = local_batch_dir / relative_path
+        key = f"{s3_base_prefix}/{relative_path}"
+        print(f"Uploading {relative_path} -> s3://{bucket}/{key}")
         store.upload_file(path, key)
 
-    print(f"Uploaded {len(files)} objects under s3://{bucket}/{s3_base_prefix}/")
+    config_key = f"{s3_base_prefix}/config.yaml"
+    print(f"Uploading config.yaml -> s3://{bucket}/{config_key}")
+    store.upload_file(config_source_path, config_key, content_type="application/x-yaml")
+
+    print(
+        f"Uploaded {len(config.expected_relative_csv_paths())} CSV objects and config.yaml "
+        f"under s3://{bucket}/{s3_base_prefix}/"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upload a local data/mirrorview/<timestamp>/ batch to S3.",
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="Path to MirrorView YAML config (e.g. jobs/mirrorview/config/default.yaml).",
     )
     parser.add_argument(
         "--path",
@@ -69,9 +97,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    local_batch_dir = args.path.expanduser().resolve()
+    config = load_mirrorview_config(args.config)
+    config_source_path = resolve_repo_path(args.config)
+    local_batch_dir = resolve_repo_path(args.path)
 
-    upload_batch(local_batch_dir=local_batch_dir)
+    upload_batch(
+        local_batch_dir=local_batch_dir,
+        config=config,
+        config_source_path=config_source_path,
+    )
 
 
 if __name__ == "__main__":

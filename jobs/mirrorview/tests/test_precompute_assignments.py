@@ -10,6 +10,11 @@ import pandas as pd
 import pytest
 
 import jobs.mirrorview.precompute_assignments as pa
+from jobs.mirrorview.config_loader import load_mirrorview_config
+from lib.constants import ROOT_DIR
+
+DEFAULT_CONFIG = load_mirrorview_config(ROOT_DIR / "jobs/mirrorview/config/default.yaml")
+TEST_RNG = np.random.default_rng(42)
 
 
 def _row(
@@ -152,7 +157,7 @@ class TestGenerateOneAssignment:
         """Sampled bundle has 20 rows and satisfies invariants for the returned flag."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits, rng=TEST_RNG)
         oversample_left = _infer_oversample_left_from_counts(result)
         assert len(result) == 20
         pa._validate_assignment_invariants(result, oversample_left)
@@ -161,7 +166,7 @@ class TestGenerateOneAssignment:
         """Per-bucket stance_toxicity_key counts follow low/mid/high draws."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits, rng=TEST_RNG)
         counts = result.groupby("stance_toxicity_key", observed=True).size()
         for key in pa.POST_CATEGORIES:
             assert key in counts.index
@@ -181,13 +186,13 @@ class TestGenerateOneAssignment:
         posts = minimal_input_posts(1)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
         with pytest.raises(ValueError, match="at least 3"):
-            pa._generate_one_assignment(splits)
+            pa._generate_one_assignment(splits, rng=TEST_RNG)
 
     def test_no_duplicate_primary_keys_within_bundle(self):
         """A bundle never contains the same post_primary_key twice."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        result = pa._generate_one_assignment(splits)
+        result = pa._generate_one_assignment(splits, rng=TEST_RNG)
         keys = result["post_primary_key"].tolist()
         assert len(keys) == len(set(keys))
 
@@ -196,17 +201,23 @@ class TestGeneratePrecomputedAssignments:
     """Tests for generate_precomputed_assignments function."""
 
     def test_output_has_total_records_to_create_rows(self):
-        """Output row count matches TOTAL_RECORDS_TO_CREATE."""
+        """Output row count matches requested total."""
         posts = minimal_input_posts(5)
-        with patch.object(pa, "TOTAL_RECORDS_TO_CREATE", 3):
-            result = pa.generate_precomputed_assignments(posts)
+        result = pa.generate_precomputed_assignments(
+            posts,
+            total_records_to_create=3,
+            rng=TEST_RNG,
+        )
         assert len(result) == 3
 
     def test_assigned_post_ids_is_valid_json_list_of_twenty(self):
         """Each cell is JSON array of 20 string post IDs."""
         posts = minimal_input_posts(5)
-        with patch.object(pa, "TOTAL_RECORDS_TO_CREATE", 2):
-            result = pa.generate_precomputed_assignments(posts)
+        result = pa.generate_precomputed_assignments(
+            posts,
+            total_records_to_create=2,
+            rng=TEST_RNG,
+        )
         for cell in result["assigned_post_ids"]:
             parsed = json.loads(cell)
             assert isinstance(parsed, list)
@@ -216,8 +227,11 @@ class TestGeneratePrecomputedAssignments:
     def test_each_bundle_satisfies_invariants_when_joined_to_posts(self):
         """Re-hydrating rows from input reproduces valid bundles."""
         posts = minimal_input_posts(5)
-        with patch.object(pa, "TOTAL_RECORDS_TO_CREATE", 4):
-            out = pa.generate_precomputed_assignments(posts)
+        out = pa.generate_precomputed_assignments(
+            posts,
+            total_records_to_create=4,
+            rng=TEST_RNG,
+        )
         for raw_ids in out["assigned_post_ids"]:
             ids = json.loads(raw_ids)
             subset = posts.loc[posts["post_primary_key"].isin(ids)].copy()
@@ -236,16 +250,20 @@ class TestGeneratePrecomputedAssignments:
         """Missing stance_toxicity_key must error before sampling."""
         posts = minimal_input_posts(5).drop(columns=["stance_toxicity_key"])
         with pytest.raises(ValueError, match="stance_toxicity_key"):
-            pa.generate_precomputed_assignments(posts)
+            pa.generate_precomputed_assignments(
+                posts,
+                total_records_to_create=1,
+                rng=TEST_RNG,
+            )
 
     def test_oversample_left_rate_near_half_over_many_draws(self):
         """Bernoulli oversample should not be stuck always True/False."""
         posts = minimal_input_posts(5)
         splits = pa.split_input_posts_by_stance_toxicity(posts)
-        pa.RNG = np.random.default_rng(pa.RANDOM_SEED)
+        rng = np.random.default_rng(42)
         n = 400
         n_left = sum(
-            _infer_oversample_left_from_counts(pa._generate_one_assignment(splits))
+            _infer_oversample_left_from_counts(pa._generate_one_assignment(splits, rng=rng))
             for _ in range(n)
         )
         assert 120 < n_left < 280
@@ -266,8 +284,12 @@ class TestWriteAssignments:
                 "created_at": ["ts"],
             }
         )
-        with patch.object(pa, "OUTPUT_RECORDS_ROOT_PREFIX", out_root):
-            pa.write_assignments(frame, "democrat", "control")
+        pa.write_assignments(
+            frame,
+            "democrat",
+            "control",
+            output_records_root_prefix=out_root,
+        )
         csv_path = out_root / "democrat" / "control" / pa.OUTPUT_RECORDS_FILENAME
         assert csv_path.is_file()
         loaded = pd.read_csv(csv_path)
@@ -286,15 +308,19 @@ class TestWriteAssignments:
                 "created_at": ["t"],
             }
         )
-        with patch.object(pa, "OUTPUT_RECORDS_ROOT_PREFIX", out_root):
-            pa.write_assignments(frame, "republican", "training_assisted")
+        pa.write_assignments(
+            frame,
+            "republican",
+            "training_assisted",
+            output_records_root_prefix=out_root,
+        )
         assert (out_root / "republican" / "training_assisted").is_dir()
 
 
 class TestGenerateAndExportPrecomputedAssignments:
     """Tests for generate_and_export_precomputed_assignments function."""
 
-    def test_composes_ids_and_condition_and_timestamp(self):
+    def test_composes_ids_and_condition_and_timestamp(self, tmp_path):
         """Export builds stable id column and passes frame to write_assignments."""
         posts = minimal_input_posts(5)
         base = pd.DataFrame(
@@ -308,11 +334,18 @@ class TestGenerateAndExportPrecomputedAssignments:
             patch.object(pa, "get_current_timestamp", return_value="fixed_ts"),
             patch.object(pa, "write_assignments", mock_write),
         ):
-            pa.generate_and_export_precomputed_assignments(posts, "democrat", "control")
+            pa.generate_and_export_precomputed_assignments(
+                posts,
+                "democrat",
+                "control",
+                assignments_per_cell=2,
+                output_records_root_prefix=tmp_path / "out",
+                rng=TEST_RNG,
+            )
         mock_write.assert_called_once()
         call_kw = mock_write.call_args.kwargs
         assignments = call_kw["assignments"]
-        expected_ids = ["democrat-control-0000", "democrat-control-0001"]
+        expected_ids = ["democrat-control-0001", "democrat-control-0002"]
         assert assignments["id"].tolist() == expected_ids
         assert assignments["political_party"].tolist() == ["democrat", "democrat"]
         assert assignments["condition"].tolist() == ["control", "control"]
@@ -324,16 +357,23 @@ class TestGenerateAndExportPrecomputedAssignments:
 class TestGenerateAndExportAllPrecomputedAssignments:
     """Tests for generate_and_export_all_precomputed_assignments function."""
 
-    def test_iterates_cartesian_product_of_constants(self):
+    def test_iterates_configured_cells(self, tmp_path):
         """Each party×condition pair is exported exactly once."""
         posts = minimal_input_posts(3)
         mock_export = MagicMock()
         with patch.object(pa, "generate_and_export_precomputed_assignments", mock_export):
-            pa.generate_and_export_all_precomputed_assignments(posts)
-        expected_calls = len(pa.POLITICAL_PARTIES) * len(pa.STUDY_CONDITIONS)
+            pa.generate_and_export_all_precomputed_assignments(
+                posts,
+                DEFAULT_CONFIG,
+                output_records_root_prefix=tmp_path / "out",
+                rng=TEST_RNG,
+            )
+        expected_calls = len(list(DEFAULT_CONFIG.iter_cells()))
         assert mock_export.call_count == expected_calls
         seen: set[tuple[str, str]] = set()
         for c in mock_export.call_args_list:
             kw = c.kwargs
             seen.add((kw["political_party"], kw["condition"]))
-        assert seen == {(p, cond) for p in pa.POLITICAL_PARTIES for cond in pa.STUDY_CONDITIONS}
+        assert seen == {
+            (party, condition) for party, condition, _count in DEFAULT_CONFIG.iter_cells()
+        }

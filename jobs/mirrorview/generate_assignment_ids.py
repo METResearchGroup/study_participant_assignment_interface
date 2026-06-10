@@ -13,5 +13,5 @@ def generate_assignment_ids(
 ) -> list[str]:
     return [
         generate_single_assignment_id(political_party, condition, i)
-        for i in range(total_assignments)
+        for i in range(1, total_assignments + 1)
     ]

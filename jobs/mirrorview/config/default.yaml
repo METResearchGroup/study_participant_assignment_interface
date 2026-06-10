@@ -1,0 +1,15 @@
+name: mirrorview_default
+input_posts_path: jobs/mirrorview/all_mirrors_claude.csv
+local_data_dir: data/mirrorview
+random_seed: 42
+s3:
+  bucket: jspsych-mirror-view-3
+  prefix: precomputed_assignments
+parties:
+  - democrat
+  - republican
+conditions:
+  - control
+  - training
+  - training_assisted
+assignments_per_cell: 1000

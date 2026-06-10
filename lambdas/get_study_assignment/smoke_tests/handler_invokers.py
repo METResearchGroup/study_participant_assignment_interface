@@ -11,8 +11,6 @@ import boto3
 from botocore.exceptions import ClientError
 
 import lambdas.get_study_assignment.handler as handler_module
-from jobs.mirrorview.constants import DEFAULT_BUCKET
-from lib.s3 import S3
 
 
 class HandlerInvocationError(RuntimeError):
@@ -46,7 +44,6 @@ class LocalHandlerInvoker:
         handler_module.region_name = region_name
         handler_module.user_assignments_table_name = user_assignments_table_name
         handler_module.study_assignment_counter_table_name = study_assignment_counter_table_name
-        handler_module.s3 = S3(bucket=DEFAULT_BUCKET, region_name=region_name)
 
     def invoke(self, event: Mapping[str, Any]) -> dict[str, Any]:
         try:

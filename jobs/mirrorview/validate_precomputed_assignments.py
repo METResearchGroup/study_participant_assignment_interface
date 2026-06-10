@@ -2,11 +2,12 @@
 
 Expects the same layout as `precompute_assignments.write_assignments`:
 `<series_root>/{political_party}/{study_condition}/assignments.csv`
-for the cartesian product of POLITICAL_PARTIES and STUDY_CONDITIONS.
+for each configured cell in the YAML config.
 
 Usage (from repo root):
 
     uv run python -m jobs.mirrorview.validate_precomputed_assignments \\
+        --config jobs/mirrorview/config/default.yaml \\
         --path data/mirrorview/2026_04_03-09:36:03
 """
 
@@ -19,6 +20,12 @@ from pathlib import Path
 import pandas as pd
 
 import jobs.mirrorview.precompute_assignments as pre
+from jobs.mirrorview.config_loader import (
+    MirrorViewConfig,
+    load_mirrorview_config,
+    resolve_repo_path,
+)
+from jobs.mirrorview.constants import OUTPUT_RECORDS_FILENAME
 from lib.constants import ROOT_DIR
 
 _EXPECTED_ASSIGNMENT_COLUMNS = (
@@ -62,11 +69,11 @@ def _get_ground_truth_sample_toxicity_political_stance(
     return pd.DataFrame(rows)
 
 
-def _validate_csv_file_exists(csv_path: Path) -> None:
+def _validate_csv_file_exists(csv_path: Path, *, config: MirrorViewConfig) -> None:
     if not csv_path.is_file():
         raise FileNotFoundError(
-            "Expected assignments file missing (layout must match "
-            f"{pre.POLITICAL_PARTIES} x {pre.STUDY_CONDITIONS}): {csv_path}"
+            "Expected assignments file missing for configured cell "
+            f"(expected paths from config {config.name!r}): {csv_path}"
         )
 
 
@@ -113,13 +120,21 @@ def validate_assignments_file(
     *,
     political_party: str,
     condition: str,
+    expected_row_count: int,
+    config: MirrorViewConfig,
 ) -> int:
     """Validate one assignments.csv file for expected schema and row invariants."""
-    _validate_csv_file_exists(csv_path)
+    _validate_csv_file_exists(csv_path, config=config)
 
     df = pd.read_csv(csv_path)
 
     _validate_no_missing_columns(df, csv_path)
+
+    if len(df) != expected_row_count:
+        raise AssertionError(
+            f"{csv_path}: expected {expected_row_count} rows for configured cell "
+            f"{political_party}/{condition}, got {len(df)}"
+        )
 
     for row_num, row in enumerate(df.itertuples(index=False, name=None), start=2):
         assignment_id, raw_post_ids, row_political_party, row_condition, _created_at = row
@@ -158,31 +173,36 @@ def _validate_root_directory(series_root: Path) -> None:
         raise FileNotFoundError(f"Not a directory: {series_root}")
 
 
-def validate_series_root(series_root: Path) -> None:
-    """Validate all assignment CSVs under series_root; raises on first failure."""
+def validate_series_root(series_root: Path, config: MirrorViewConfig) -> None:
+    """Validate all configured assignment CSVs under series_root; raises on first failure."""
     _validate_root_directory(series_root)
 
-    # posts used to generate the assignments (these are the posts that will
-    # actually be shown to participants)
-    ground_truth_post_pool = pd.read_csv(pre.INPUT_POSTS_PATH)
-
+    input_posts_path = resolve_repo_path(config.input_posts_path)
+    ground_truth_post_pool = pd.read_csv(input_posts_path)
     ground_truth_post_pool = ground_truth_post_pool.set_index("post_primary_key")
 
-    for political_party in pre.POLITICAL_PARTIES:
-        for condition in pre.STUDY_CONDITIONS:
-            csv_path = series_root / political_party / condition / pre.OUTPUT_RECORDS_FILENAME
-            n_rows = validate_assignments_file(
-                csv_path,
-                ground_truth_post_pool,
-                political_party=political_party,
-                condition=condition,
-            )
-            print(f"OK: {political_party}/{condition} ({n_rows} rows) -> {csv_path}")
+    for political_party, condition, expected_row_count in config.iter_cells():
+        csv_path = series_root / political_party / condition / OUTPUT_RECORDS_FILENAME
+        n_rows = validate_assignments_file(
+            csv_path,
+            ground_truth_post_pool,
+            political_party=political_party,
+            condition=condition,
+            expected_row_count=expected_row_count,
+            config=config,
+        )
+        print(f"OK: {political_party}/{condition} ({n_rows} rows) -> {csv_path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Validate precomputed assignments.csv trees against MirrorView invariants."
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="Path to MirrorView YAML config (e.g. jobs/mirrorview/config/default.yaml).",
     )
     parser.add_argument(
         "--path",
@@ -191,8 +211,9 @@ def main() -> None:
         "(e.g. data/mirrorview/2026_04_03-05:34:59)",
     )
     args = parser.parse_args()
+    config = load_mirrorview_config(args.config)
     series_root = (ROOT_DIR / args.path).resolve()
-    validate_series_root(series_root)
+    validate_series_root(series_root, config)
     print(f"All checks passed for {series_root}")
 
 

@@ -23,10 +23,13 @@ variable "ecr_repository_name" {
   default     = "get_study_assignment"
 }
 
-variable "s3_assignments_bucket_name" {
-  description = "S3 bucket name for assignment parquet reads (IAM only until handler uses env)."
-  type        = string
-  default     = "jspsych-mirror-view-3"
+variable "s3_assignment_bucket_arns" {
+  description = "IAM-only allowlist of S3 bucket ARNs the Lambda may read assignment batches from. Does not configure runtime bucket selection; batch config.yaml controls that."
+  type        = list(string)
+  default = [
+    "arn:aws:s3:::jspsych-mirror-view-3",
+    "arn:aws:s3:::jspsych-mirror-view-4",
+  ]
 }
 
 variable "lambda_memory_size" {
