@@ -17,7 +17,7 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
+from jobs.mirrorview.constants import OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lib.dynamodb import (
     AssignmentCounterConflictError,
@@ -152,9 +152,9 @@ class TestUserAssignmentSmoke(DynamoDbSmokeTestBase):
         political_party = "democrat"
         condition = "control"
         payload_data = {
-            "s3_bucket": DEFAULT_BUCKET,
+            "s3_bucket": "jspsych-mirror-view-3",
             "s3_key": (
-                f"{DEFAULT_S3_PREFIX}/{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
+                f"precomputed_assignments/{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
             ),
             "assignment_id": generate_single_assignment_id(
                 political_party=political_party,

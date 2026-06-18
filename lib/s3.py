@@ -51,7 +51,12 @@ class S3:
                 ct = "application/json"
             elif suffix == ".csv":
                 ct = "text/csv"
+            elif suffix in {".yaml", ".yml"}:
+                ct = "application/x-yaml"
         self.upload_bytes(key, data, content_type=ct)
+
+    def load_text(self, key: str) -> str:
+        return self.get_bytes(key).decode("utf-8")
 
     def get_bytes(self, key: str) -> bytes:
         key = key.lstrip("/")

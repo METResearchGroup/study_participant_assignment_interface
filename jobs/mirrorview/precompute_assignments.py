@@ -26,13 +26,21 @@ Selection prioritizes: Unseen posts in that condition; so full coverage is achie
       selecting posts.
 """
 
+from __future__ import annotations
+
+import argparse
 import json
 import pathlib
 
 import numpy as np
 import pandas as pd
 
-from jobs.mirrorview.constants import LOCAL_DATA_PREFIX, OUTPUT_RECORDS_FILENAME
+from jobs.mirrorview.config_loader import (
+    MirrorViewConfig,
+    load_mirrorview_config,
+    resolve_repo_path,
+)
+from jobs.mirrorview.constants import OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_assignment_ids
 from lib.timestamp_utils import get_current_timestamp
 
@@ -46,12 +54,6 @@ POST_CATEGORIES = [
     "right__sample_high_toxicity",
     "right__sample_middle_toxicity",
 ]
-POLITICAL_PARTIES = ["democrat", "republican"]
-STUDY_CONDITIONS = ["control", "training", "training_assisted"]
-
-# Single generator for the whole batch run so draws are reproducible for a given seed.
-RANDOM_SEED = 42
-RNG = np.random.default_rng(RANDOM_SEED)
 
 TOTAL_POSTS_TO_ASSIGN = 20
 TOTAL_LOW_TOXICITY_POSTS = 5
@@ -63,26 +65,20 @@ VALID_LEFT_RIGHT_TOTALS = {
     "oversample_right": {"left": 10, "right": 10},
 }
 
-CURRENT_DIR = pathlib.Path(__file__).parent
-INPUT_POSTS_FILENAME = "all_mirrors_claude.csv"
-INPUT_POSTS_PATH = CURRENT_DIR / INPUT_POSTS_FILENAME
 
-TOTAL_RECORDS_TO_CREATE = 1000
-OUTPUT_RECORDS_ROOT_PREFIX = LOCAL_DATA_PREFIX / get_current_timestamp()
-
-
-def load_input_posts() -> pd.DataFrame:
+def load_input_posts(input_posts_path: pathlib.Path) -> pd.DataFrame:
     """Load the input posts from the CSV file."""
-    df = pd.read_csv(INPUT_POSTS_PATH)
-    return df
+    return pd.read_csv(input_posts_path)
 
 
 def write_assignments(
     assignments: pd.DataFrame,
     political_party: str,
     condition: str,
+    *,
+    output_records_root_prefix: pathlib.Path,
 ) -> None:
-    output_path = OUTPUT_RECORDS_ROOT_PREFIX / political_party / condition / OUTPUT_RECORDS_FILENAME
+    output_path = output_records_root_prefix / political_party / condition / OUTPUT_RECORDS_FILENAME
     output_path.parent.mkdir(parents=True, exist_ok=True)
     assignments.to_csv(output_path, index=False)
 
@@ -119,11 +115,11 @@ def _validate_assignment_invariants(sampled: pd.DataFrame, oversample_left: bool
         )
 
 
-def _sample_n_rows(df: pd.DataFrame, n: int) -> pd.DataFrame:
+def _sample_n_rows(df: pd.DataFrame, n: int, *, rng: np.random.Generator) -> pd.DataFrame:
     if len(df) < n:
         msg = f"Need at least {n} posts in this stance/toxicity bucket, found {len(df)}"
         raise ValueError(msg)
-    return df.sample(n=n, random_state=RNG).reset_index(drop=True)
+    return df.sample(n=n, random_state=rng).reset_index(drop=True)
 
 
 def split_input_posts_by_stance_toxicity(
@@ -139,91 +135,47 @@ def split_input_posts_by_stance_toxicity(
     }
 
 
-def _generate_one_assignment(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Sample one valid 20-post bundle from pre-split stance/toxicity pools.
-
-    Draws counts per the MirrorView spec (low/middle/high and left/right splits),
-    shuffles row order, validates invariants, and returns the combined frame.
-    """
-    oversample_left = RNG.random() < 0.5
+def _generate_one_assignment(
+    splits: dict[str, pd.DataFrame],
+    *,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    """Sample one valid 20-post bundle from pre-split stance/toxicity pools."""
+    oversample_left = rng.random() < 0.5
     high_left_n = 3 if oversample_left else 2
     high_right_n = 2 if oversample_left else 3
 
-    # get samples from each subset
     parts = [
-        _sample_n_rows(df=splits["left__sample_low_toxicity"], n=3),
-        _sample_n_rows(df=splits["right__sample_low_toxicity"], n=2),
-        _sample_n_rows(df=splits["left__sample_middle_toxicity"], n=5),
-        _sample_n_rows(df=splits["right__sample_middle_toxicity"], n=5),
-        _sample_n_rows(df=splits["left__sample_high_toxicity"], n=high_left_n),
-        _sample_n_rows(df=splits["right__sample_high_toxicity"], n=high_right_n),
+        _sample_n_rows(df=splits["left__sample_low_toxicity"], n=3, rng=rng),
+        _sample_n_rows(df=splits["right__sample_low_toxicity"], n=2, rng=rng),
+        _sample_n_rows(df=splits["left__sample_middle_toxicity"], n=5, rng=rng),
+        _sample_n_rows(df=splits["right__sample_middle_toxicity"], n=5, rng=rng),
+        _sample_n_rows(df=splits["left__sample_high_toxicity"], n=high_left_n, rng=rng),
+        _sample_n_rows(df=splits["right__sample_high_toxicity"], n=high_right_n, rng=rng),
     ]
 
-    # combine results and shuffle
     combined = pd.concat(parts, ignore_index=True)
-    perm = RNG.permutation(len(combined))
+    perm = rng.permutation(len(combined))
     combined = combined.iloc[perm].reset_index(drop=True)
 
-    # validate invariants
     _validate_assignment_invariants(combined, oversample_left)
 
     return combined
 
 
-def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
-    """Algorithm:
-
-    Split `input_posts` into six subsets:
-
-    LOW_TOXIC_LEFT = df[df["stance_toxicity_key"] == "left__sample_low_toxicity"]
-    LOW_TOXIC_RIGHT = ...
-    MIDDLE_TOXIC_LEFT = ...
-    MIDDLE_TOXIC_RIGHT = ...
-    HIGH_TOXIC_LEFT = ...
-    HIGH_TOXIC_RIGHT = ...
-
-    Then randomly select `n` samples for each. Also set a boolean,
-    oversample_left, with p=0.5 of True
-
-    SUBSET_LOW_TOXIC_LEFT = pick 3 from LOW_TOXIC_LEFT
-    SUBSET_LOW_TOXIC_RIGHT = pick 2 from LOW_TOXIC_RIGHT
-    SUBSET_MIDDLE_TOXIC_LEFT = (randomly pick 5 from MIDDLE_TOXIC_LEFT)
-    SUBSET_MIDDLE_TOXIC_RIGHT = (randomly pick 5 from MIDDLE_TOXIC_RIGHT)
-    SUBSET_HIGH_TOXIC_LEFT = (randomly pick 3 from HIGH_TOXIC_LEFT if oversample_left, else 2)
-    SUBSET_HIGH_TOXIC_RIGHT = (randomly pick 2 from HIGH_TOXIC_RIGHT if oversample_left, else 3)
-
-    Then create the sample
-
-    sampled_df = []
-
-    Then validate against the invariants.
-    - TOTAL_POSTS_TO_ASSIGN
-    - TOTAL_LOW_TOXICITY_POSTS
-    - TOTAL_HIGH_TOXICITY_POSTS
-    - TOTAL_MIDDLE_TOXICITY_POSTS
-    - VALID_LEFT_RIGHT_TOTALS
-
-    The naive approach of randomly sampling posts until we meet all the invariants
-    is (1) tricky to validate and (2) possibly an O(N) while-loop.
-
-    In contrast, here the rate-limiting step is however long it takes to split
-    the posts into the subsets, as the sampling operation is O(N//d), where d=6
-    is the number of subsets and each of the d=6 sampling operations is a linear
-    operation on an average of N//d rows. This eliminates the while-loop and
-    makes sampling more consistent and well defined and removes the invariant
-    checks required from a naive while-loop.
-
-    It's OK to sample with replacement. It'll be a pain to make sure that we
-    implement sampling without replacement, and since we include randomness,
-    then in expectation this'll lead to a balanced representation.
-    """
+def generate_precomputed_assignments(
+    input_posts: pd.DataFrame,
+    *,
+    total_records_to_create: int,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
     splits = split_input_posts_by_stance_toxicity(input_posts)
 
     assigned_post_ids: list[str] = []
-    for i in range(TOTAL_RECORDS_TO_CREATE):
+    for i in range(total_records_to_create):
         if i % 100 == 0:
-            print(f"Generated {i:04d}/{TOTAL_RECORDS_TO_CREATE:04d} assignments.")
-        sampled = _generate_one_assignment(splits)
+            print(f"Generated {i:04d}/{total_records_to_create:04d} assignments.")
+        sampled = _generate_one_assignment(splits, rng=rng)
         post_ids = [str(primary_key) for primary_key in sampled["post_primary_key"].tolist()]
         assigned_post_ids.append(json.dumps(post_ids))
 
@@ -231,10 +183,20 @@ def generate_precomputed_assignments(input_posts: pd.DataFrame) -> pd.DataFrame:
 
 
 def generate_and_export_precomputed_assignments(
-    input_posts: pd.DataFrame, political_party: str, condition: str
+    input_posts: pd.DataFrame,
+    political_party: str,
+    condition: str,
+    *,
+    assignments_per_cell: int,
+    output_records_root_prefix: pathlib.Path,
+    rng: np.random.Generator,
 ) -> None:
     """Build assignment rows for one party/condition cell and write assignments.csv."""
-    precomputed_assignments = generate_precomputed_assignments(input_posts)
+    precomputed_assignments = generate_precomputed_assignments(
+        input_posts,
+        total_records_to_create=assignments_per_cell,
+        rng=rng,
+    )
     created_at = get_current_timestamp()
     n = len(precomputed_assignments)
     exportable_assignments = pd.DataFrame(
@@ -247,42 +209,68 @@ def generate_and_export_precomputed_assignments(
         }
     )
     write_assignments(
-        assignments=exportable_assignments, political_party=political_party, condition=condition
+        assignments=exportable_assignments,
+        political_party=political_party,
+        condition=condition,
+        output_records_root_prefix=output_records_root_prefix,
     )
 
 
-def generate_and_export_all_precomputed_assignments(input_posts: pd.DataFrame) -> None:
-    """Export precomputed assignments for each political party and study condition.
+def generate_and_export_all_precomputed_assignments(
+    input_posts: pd.DataFrame,
+    config: MirrorViewConfig,
+    *,
+    output_records_root_prefix: pathlib.Path,
+    rng: np.random.Generator,
+) -> None:
+    """Export precomputed assignments for each configured party/condition cell."""
+    for political_party, condition, assignments_per_cell in config.iter_cells():
+        print(
+            f"Generating precomputed assignments: political_party={political_party!r}, "
+            f"condition={condition!r}"
+        )
+        generate_and_export_precomputed_assignments(
+            input_posts=input_posts,
+            political_party=political_party,
+            condition=condition,
+            assignments_per_cell=assignments_per_cell,
+            output_records_root_prefix=output_records_root_prefix,
+            rng=rng,
+        )
+        print(
+            f"Finished precomputed assignments: political_party={political_party!r}, "
+            f"condition={condition!r}."
+        )
 
-    Writes one assignments.csv per (POLITICAL_PARTIES x STUDY_CONDITIONS) cell.
-    """
-    for political_party in POLITICAL_PARTIES:
-        for condition in STUDY_CONDITIONS:
-            print(
-                f"Generating precomputed assignments: political_party={political_party!r}, "
-                f"condition={condition!r}"
-            )
-            generate_and_export_precomputed_assignments(
-                input_posts=input_posts, political_party=political_party, condition=condition
-            )
-            print(
-                f"Finished precomputed assignments: political_party={political_party!r}, "
-                f"condition={condition!r}."
-            )
 
+def main(config_path: pathlib.Path) -> None:
+    config = load_mirrorview_config(config_path)
+    input_posts_path = resolve_repo_path(config.input_posts_path)
+    local_data_root = resolve_repo_path(config.local_data_dir)
+    output_records_root_prefix = local_data_root / get_current_timestamp()
+    rng = np.random.default_rng(config.random_seed)
 
-def main():
-    # load input posts
-    input_posts: pd.DataFrame = load_input_posts()
-
-    # add key used in precomputation sampling.
+    input_posts = load_input_posts(input_posts_path)
     input_posts["stance_toxicity_key"] = (
         input_posts["sampled_stance"] + "__" + input_posts["sample_toxicity_type"]
     )
 
-    # run and export precomputation
-    generate_and_export_all_precomputed_assignments(input_posts)
+    generate_and_export_all_precomputed_assignments(
+        input_posts,
+        config,
+        output_records_root_prefix=output_records_root_prefix,
+        rng=rng,
+    )
+    print(f"Wrote precomputed assignments under {output_records_root_prefix}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Precompute MirrorView assignment CSV batches.")
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=pathlib.Path,
+        help="Path to MirrorView YAML config (e.g. jobs/mirrorview/config/default.yaml).",
+    )
+    cli_args = parser.parse_args()
+    main(cli_args.config)

@@ -20,11 +20,11 @@ For full problem framing and evolution of the design, see [`strategy_planning/20
 
 | Area | Description |
 |------|-------------|
-| **Runtime** | AWS Lambda **`get_study_assignment`** (container image): looks up or creates a per-user assignment, balances across conditions using counters, loads the matching precomputed row from S3, returns `assigned_post_ids`, `condition`, and `already_assigned`. Implementation: [`lambdas/get_study_assignment/handler.py`](lambdas/get_study_assignment/handler.py). |
-| **Data** | **S3** stores precomputed assignment artifacts (CSV consumed by the handler). **DynamoDB** stores per-user assignment records and per-cell counters. Bucket and tables are provisioned/configured in Terraform. |
-| **Libraries** | [`lib/dynamodb.py`](lib/dynamodb.py) — user assignments, counters, compare-and-increment with conflict handling. [`lib/s3.py`](lib/s3.py) — ordered key listing and loading objects into pandas. |
-| **Batch jobs** | [`jobs/mirrorview/`](jobs/mirrorview/) — deterministic assignment IDs, precomputation, upload to S3. |
-| **Infrastructure** | [`infra/`](infra/) — DynamoDB tables, ECR repository, IAM role, image-based Lambda. Variables such as S3 bucket and image URI: [`infra/variables_get_study_assignment.tf`](infra/variables_get_study_assignment.tf). |
+| **Runtime** | AWS Lambda **`get_study_assignment`** (container image): looks up or creates a per-user assignment, balances across conditions using counters, loads the matching precomputed row from S3 using the batch named in `assignment_batch_uri`, returns `assigned_post_ids`, `condition`, and `already_assigned`. Implementation: [`lambdas/get_study_assignment/handler.py`](lambdas/get_study_assignment/handler.py). |
+| **Data** | **S3** stores precomputed assignment batches (CSV plus batch `config.yaml`). **DynamoDB** stores per-user assignment records and per-cell counters. Runtime bucket and conditions come from the uploaded batch config, not Terraform. |
+| **Libraries** | [`lib/dynamodb.py`](lib/dynamodb.py) — user assignments, counters, compare-and-increment with conflict handling. [`lib/s3.py`](lib/s3.py) — object reads/writes and loading CSV into pandas. |
+| **Batch jobs** | [`jobs/mirrorview/`](jobs/mirrorview/) — YAML-configured precomputation, validation, and upload to S3. Config files live under [`jobs/mirrorview/config/`](jobs/mirrorview/config/). |
+| **Infrastructure** | [`infra/`](infra/) — DynamoDB tables, ECR repository, IAM role, image-based Lambda. IAM allows reading assignment buckets; it does not set the runtime bucket. Variables: [`infra/variables_get_study_assignment.tf`](infra/variables_get_study_assignment.tf). |
 | **Operations** | [`docs/runbook/DEPLOY_INFRA.md`](docs/runbook/DEPLOY_INFRA.md) — AWS CLI, Terraform, Docker build, ECR push via [`scripts/build_and_push_lambda_image_to_ecr.sh`](scripts/build_and_push_lambda_image_to_ecr.sh). |
 
 The Lambda is intended to be invoked with the AWS SDK, CLI, or a future API layer (for example API Gateway); this repo does not assume a specific HTTP front door.
@@ -62,19 +62,20 @@ sequenceDiagram
   participant DDB as DynamoDB
   participant S3 as S3
 
-  Client->>Lambda: study_id, study_iteration_id, prolific_id, political_party
+  Client->>Lambda: study_id, study_iteration_id, prolific_id, political_party, assignment_batch_uri
+  Lambda->>S3: load batch config.yaml
   Lambda->>DDB: get user assignment
   alt already assigned
     Lambda->>S3: load precomputed row for stored assignment_id
     Lambda-->>Client: assigned_post_ids, condition, already_assigned
   else new user
     Lambda->>DDB: list counters for party
-    Lambda->>Lambda: choose least-loaded party:condition
+    Lambda->>Lambda: choose least-loaded configured party:condition
     loop retries on conflict
       Lambda->>DDB: compare_and_increment counter
     end
     Lambda->>DDB: put user assignment
-    Lambda->>S3: latest precomputed file for party and condition
+    Lambda->>S3: configured assignments.csv for party and condition
     Lambda-->>Client: assigned_post_ids, condition, already_assigned
   end
 ```

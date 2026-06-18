@@ -112,8 +112,8 @@ class TestGenerateAssignmentIds:
         expected: list[str] = []
         assert result == expected
 
-    def test_returns_sequential_ids_from_zero(self):
-        """Test ids use indices 0 .. total_assignments-1 in order."""
+    def test_returns_sequential_ids_from_one(self):
+        """Test ids use indices 1 .. total_assignments in order."""
         # Arrange
         political_party = "democrat"
         condition = "control"
@@ -128,9 +128,9 @@ class TestGenerateAssignmentIds:
 
         # Assert
         expected = [
-            "democrat-control-0000",
             "democrat-control-0001",
             "democrat-control-0002",
+            "democrat-control-0003",
         ]
         assert result == expected
 
@@ -150,7 +150,7 @@ class TestGenerateAssignmentIds:
 
         # Assert
         expected = [
-            "republican-training_assisted-0000",
             "republican-training_assisted-0001",
+            "republican-training_assisted-0002",
         ]
         assert result == expected

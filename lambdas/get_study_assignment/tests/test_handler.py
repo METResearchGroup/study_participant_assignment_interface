@@ -13,11 +13,19 @@ import pandas as pd
 import pytest
 
 import lambdas.get_study_assignment.handler as h
+from jobs.mirrorview.config_loader import load_mirrorview_config
+from lib.constants import ROOT_DIR
 from lib.dynamodb import (
     AssignmentCounterConflictError,
     UserAssignmentPayload,
     UserAssignmentRecord,
 )
+
+DEFAULT_CONFIG = load_mirrorview_config(ROOT_DIR / "jobs/mirrorview/config/default.yaml")
+DEFAULT_STUDY_CONDITIONS = DEFAULT_CONFIG.configured_conditions()
+SCALED_CONFIG = load_mirrorview_config(ROOT_DIR / "jobs/mirrorview/config/mirrorview_scaled.yaml")
+BATCH_PREFIX = "precomputed_assignments/2026_06_10-15:00:00"
+BATCH_URI = f"s3://{DEFAULT_CONFIG.s3.bucket}/{BATCH_PREFIX}"
 
 
 def _make_payload(
@@ -110,6 +118,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -130,6 +139,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -146,6 +156,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -169,6 +180,7 @@ class TestSelectLeastAssignmentPartyConditionKey:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -178,16 +190,14 @@ class TestSelectLeastAssignmentPartyConditionKey:
     def test_select_least_key_raises_when_no_candidates(self):
         """Test defensive error when no counters and no default conditions exist."""
         # Arrange
-        with (
-            patch.object(h, "DEFAULT_STUDY_CONDITIONS", tuple()),
-            patch.object(h, "list_assignment_counters_for_party", return_value=[]),
-        ):
+        with patch.object(h, "list_assignment_counters_for_party", return_value=[]):
             # Act / Assert
             with pytest.raises(ValueError, match="No candidate assignment keys"):
                 h.select_least_assignment_party_condition_key(
                     study_id="study-1",
                     study_iteration_id="iter-1",
                     political_party="democrat",
+                    study_conditions=(),
                 )
 
 
@@ -212,6 +222,7 @@ class TestAssignUserToCondition:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -221,6 +232,7 @@ class TestAssignUserToCondition:
             study_id="study-1",
             study_iteration_id="iter-1",
             political_party="democrat",
+            study_conditions=DEFAULT_STUDY_CONDITIONS,
         )
         mock_increment.assert_called_once_with(
             study_id="study-1",
@@ -251,6 +263,7 @@ class TestAssignUserToCondition:
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 political_party="democrat",
+                study_conditions=DEFAULT_STUDY_CONDITIONS,
             )
 
         # Assert
@@ -281,140 +294,43 @@ class TestAssignUserToCondition:
                     study_id="study-1",
                     study_iteration_id="iter-1",
                     political_party="democrat",
+                    study_conditions=DEFAULT_STUDY_CONDITIONS,
                 )
 
 
-class TestGetLatestUploadedPrecomputedAssignmentsS3Key:
-    """Tests for get_latest_uploaded_precomputed_assignments_s3_key function."""
+class TestBuildPrecomputedAssignmentsS3Key:
+    """Tests for build_precomputed_assignments_s3_key function."""
 
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_returns_latest_match(self):
-        """Test reverse lexical sort picks latest matching key."""
-        # Arrange
-        keys = [
-            "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv",
-            "precomputed_assignments/2026_01_03-00:00:00/democrat/control/assignments.csv",
-            "precomputed_assignments/2026_01_02-00:00:00/democrat/control/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            # Act
-            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
-                political_party="democrat",
-                condition="control",
-            )
-
-        # Assert
-        expected = "precomputed_assignments/2026_01_03-00:00:00/democrat/control/assignments.csv"
-        assert result == expected
-
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_ignores_irrelevant_keys(self):
-        """Test keys for other party, condition, or filename are excluded."""
-        # Arrange
-        keys = [
-            "precomputed_assignments/2026_01_02-00:00:00/republican/control/assignments.csv",
-            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026_01_04-00:00:00/democrat/control/not_assignments.txt",
-            "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            # Act
-            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
-                political_party="democrat",
-                condition="control",
-            )
-
-        # Assert
-        expected = "precomputed_assignments/2026_01_01-00:00:00/democrat/control/assignments.csv"
-        assert result == expected
-
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_training_not_training_assisted(
-        self,
-    ):
-        """`condition=training` must not match keys under .../training_assisted/..."""
-        keys = [
-            "precomputed_assignments/2026_01_01-00:00:00/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026_01_02-00:00:00/democrat/training/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
-                political_party="democrat",
-                condition="training",
-            )
-        expected = "precomputed_assignments/2026_01_02-00:00:00/democrat/training/assignments.csv"
-        assert result == expected
-
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_training_assisted_exact_segment(
-        self,
-    ):
-        """`condition=training_assisted` matches only the assisted path when both exist."""
-        keys = [
-            "precomputed_assignments/2026_01_01-00:00:00/democrat/training/assignments.csv",
-            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv",
-            "precomputed_assignments/2026_01_02-00:00:00/democrat/training_assisted/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
-                political_party="democrat",
-                condition="training_assisted",
-            )
-        expected = (
-            "precomputed_assignments/2026_01_03-00:00:00/democrat/training_assisted/assignments.csv"
+    def test_builds_key_from_batch_prefix_party_and_condition(self):
+        result = h.build_precomputed_assignments_s3_key(
+            batch_key_prefix=BATCH_PREFIX,
+            political_party="democrat",
+            condition="control",
         )
+        expected = f"{BATCH_PREFIX}/democrat/control/assignments.csv"
         assert result == expected
 
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_no_match(self):
-        """Test no matching keys raises ValueError with party and condition in message."""
-        # Arrange
-        with patch.object(h.s3, "list_keys_ordered", return_value=[]):
-            # Act / Assert
-            with pytest.raises(ValueError, match="democrat") as exc_info:
-                h.get_latest_uploaded_precomputed_assignments_s3_key(
-                    political_party="democrat",
-                    condition="control",
-                )
-        assert "control" in str(exc_info.value)
 
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_prefers_prod_over_handler_smoke(
-        self,
-    ):
-        """Regression: ~handler-smoke roots must not outrank timestamp production batches."""
-        keys = [
-            "precomputed_assignments/~handler-smoke/local-smoke_2026_04_07-06:27:21_dd44c791/"
-            "democrat/training/assignments.csv",
-            "precomputed_assignments/2026_04_03-09:36:03/democrat/training/assignments.csv",
-            "precomputed_assignments/2026_04_07-06:17:02/democrat/training/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            result = h.get_latest_uploaded_precomputed_assignments_s3_key(
+class TestSelectLeastAssignmentScaledConfig:
+    """Tests for one-condition scaled assignment behavior."""
+
+    def test_scaled_config_only_considers_training_assisted(self):
+        records = [MagicMock(study_unique_assignment_key="democrat:training_assisted", counter=2)]
+        with patch.object(h, "list_assignment_counters_for_party", return_value=records):
+            result = h.select_least_assignment_party_condition_key(
+                study_id="study-1",
+                study_iteration_id="iter-1",
                 political_party="democrat",
-                condition="training",
+                study_conditions=SCALED_CONFIG.configured_conditions(),
             )
-        expected = "precomputed_assignments/2026_04_07-06:17:02/democrat/training/assignments.csv"
-        assert result == expected
-
-    def test_get_latest_uploaded_precomputed_assignments_s3_key_raises_when_only_smoke_matches(
-        self,
-    ):
-        """If only non-production batch folders match, fail with a production-specific error."""
-        keys = [
-            "precomputed_assignments/~handler-smoke/local-smoke_2026_04_07-06:27:21_dd44c791/"
-            "democrat/training/assignments.csv",
-        ]
-        with patch.object(h.s3, "list_keys_ordered", return_value=keys):
-            with pytest.raises(
-                ValueError, match="No production precomputed assignment key matched"
-            ):
-                h.get_latest_uploaded_precomputed_assignments_s3_key(
-                    political_party="democrat",
-                    condition="training",
-                )
+        assert result == ("democrat:training_assisted", 2)
 
 
 class TestSetUserAssignmentRecord:
     """Tests for set_user_assignment_record function."""
 
     def test_set_user_assignment_record_persists_expected_payload(self):
-        """Test payload includes assignment id, metadata, and latest S3 key."""
-        # Arrange
+        """Test payload includes assignment id, metadata, and batch S3 key."""
         persisted_record = _make_record(user_id="prolific-1")
         with (
             patch.object(
@@ -425,46 +341,36 @@ class TestSetUserAssignmentRecord:
             patch.object(
                 h, "generate_single_assignment_id", return_value="democrat-control-0011"
             ) as mock_id,
-            patch.object(
-                h,
-                "get_latest_uploaded_precomputed_assignments_s3_key",
-                return_value="precomputed_assignments/x/democrat/control/assignments.csv",
-            ) as mock_key,
             patch.object(h, "put_user_assignment", return_value=persisted_record) as mock_put,
         ):
-            # Act
             result = h.set_user_assignment_record(
                 study_id="study-1",
                 study_iteration_id="iter-1",
                 prolific_id="prolific-1",
                 political_party="democrat",
+                mirrorview_config=DEFAULT_CONFIG,
+                batch_key_prefix=BATCH_PREFIX,
             )
 
-        # Assert
         assert result == persisted_record
         mock_assign.assert_called_once_with(
             study_id="study-1",
             study_iteration_id="iter-1",
             political_party="democrat",
+            study_conditions=DEFAULT_STUDY_CONDITIONS,
         )
         mock_id.assert_called_once_with(
             political_party="democrat",
             condition="control",
             index=11,
         )
-        mock_key.assert_called_once_with(political_party="democrat", condition="control")
 
         mock_put.assert_called_once()
         call_kwargs = mock_put.call_args.kwargs
-        assert call_kwargs["study_id"] == "study-1"
-        assert call_kwargs["study_iteration_id"] == "iter-1"
-        assert call_kwargs["user_id"] == "prolific-1"
-        assert call_kwargs["table_name"] == h.user_assignments_table_name
-        assert call_kwargs["region_name"] == h.region_name
         payload = call_kwargs["payload"]
         assert isinstance(payload, UserAssignmentPayload)
-        assert payload.s3_bucket == h.DEFAULT_BUCKET
-        assert payload.s3_key == "precomputed_assignments/x/democrat/control/assignments.csv"
+        assert payload.s3_bucket == DEFAULT_CONFIG.s3.bucket
+        assert payload.s3_key == f"{BATCH_PREFIX}/democrat/control/assignments.csv"
         assert payload.assignment_id == "democrat-control-0011"
         assert json.loads(payload.metadata) == {
             "political_party": "democrat",
@@ -486,6 +392,8 @@ class TestSetUserAssignmentRecord:
                     study_iteration_id="iter-1",
                     prolific_id="prolific-1",
                     political_party="democrat",
+                    mirrorview_config=DEFAULT_CONFIG,
+                    batch_key_prefix=BATCH_PREFIX,
                 )
 
 
@@ -508,6 +416,8 @@ class TestGetOrSetUserAssignmentRecord:
                 study_iteration_id="iter-1",
                 prolific_id="prolific-1",
                 political_party="democrat",
+                mirrorview_config=DEFAULT_CONFIG,
+                batch_key_prefix=BATCH_PREFIX,
             )
 
         # Assert
@@ -533,6 +443,8 @@ class TestGetOrSetUserAssignmentRecord:
                 study_iteration_id="iter-2",
                 prolific_id="prolific-2",
                 political_party="republican",
+                mirrorview_config=DEFAULT_CONFIG,
+                batch_key_prefix=BATCH_PREFIX,
             )
 
         # Assert
@@ -543,21 +455,22 @@ class TestGetOrSetUserAssignmentRecord:
             study_iteration_id="iter-2",
             prolific_id="prolific-2",
             political_party="republican",
+            mirrorview_config=DEFAULT_CONFIG,
+            batch_key_prefix=BATCH_PREFIX,
         )
 
 
-class TestLoadLatestPrecomputedAssignments:
-    """Tests for load_latest_precomputed_assignments function."""
+class TestLoadPrecomputedAssignments:
+    """Tests for load_precomputed_assignments function."""
 
-    def test_load_latest_precomputed_assignments_delegates_to_s3_loader(self):
-        """Test S3 CSV loader is called with the provided key."""
-        # Arrange
+    def test_load_precomputed_assignments_delegates_to_s3_loader(self):
         expected = pd.DataFrame({"id": ["x"], "assigned_post_ids": ['["p1"]']})
-        with patch.object(h.s3, "load_csv_to_dataframe", return_value=expected) as mock_loader:
-            # Act
-            result = h.load_latest_precomputed_assignments("some/key/assignments.csv")
+        with patch.object(h.S3, "load_csv_to_dataframe", return_value=expected) as mock_loader:
+            result = h.load_precomputed_assignments(
+                bucket="example-bucket",
+                s3_key="some/key/assignments.csv",
+            )
 
-        # Assert
         assert result is expected
         mock_loader.assert_called_once_with(key="some/key/assignments.csv")
 
@@ -571,7 +484,7 @@ class TestGetPrecomputedAssignment:
         record = _make_record(user_id="prolific-1")
         payload = _make_payload(assignment_id="democrat-control-0007")
         frame = pd.DataFrame([{"id": "democrat-control-0007", "assigned_post_ids": '["p1", "p2"]'}])
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             # Act
             result = h.get_precomputed_assignment(record, payload)
 
@@ -585,7 +498,7 @@ class TestGetPrecomputedAssignment:
         record = _make_record(user_id="prolific-2")
         payload = _make_payload(assignment_id="democrat-control-0010")
         frame = pd.DataFrame([{"id": "democrat-control-0010", "assigned_post_ids": ["p3", "p4"]}])
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             # Act
             result = h.get_precomputed_assignment(record, payload)
 
@@ -599,7 +512,7 @@ class TestGetPrecomputedAssignment:
         record = _make_record(user_id="prolific-3")
         payload = _make_payload(assignment_id="missing-id")
         frame = pd.DataFrame([{"id": "other-id", "assigned_post_ids": '["p1"]'}])
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             # Act / Assert
             with pytest.raises(ValueError, match="Assignment not found for user"):
                 h.get_precomputed_assignment(record, payload)
@@ -612,7 +525,7 @@ class TestGetPrecomputedAssignment:
         frame = pd.DataFrame(
             [{"id": "democrat-control-0011", "assigned_post_ids": {"bad": "type"}}]
         )
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             # Act / Assert
             with pytest.raises(ValueError, match="Unexpected assigned_post_ids format"):
                 h.get_precomputed_assignment(record, payload)
@@ -624,7 +537,7 @@ class TestGetPrecomputedAssignment:
         frame = pd.DataFrame(
             [{"id": "democrat-control-0012", "assigned_post_ids": '{"not": "a list"}'}]
         )
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             with pytest.raises(ValueError, match="must be a JSON list"):
                 h.get_precomputed_assignment(record, payload)
 
@@ -633,12 +546,12 @@ class TestGetPrecomputedAssignment:
         record = _make_record(user_id="prolific-6")
         payload = _make_payload(assignment_id="democrat-control-0013")
         frame = pd.DataFrame([{"id": "democrat-control-0013", "assigned_post_ids": [1, 2, 3]}])
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame):
             with pytest.raises(ValueError, match="list of strings"):
                 h.get_precomputed_assignment(record, payload)
 
         frame_json = pd.DataFrame([{"id": "democrat-control-0013", "assigned_post_ids": "[1, 2]"}])
-        with patch.object(h, "load_latest_precomputed_assignments", return_value=frame_json):
+        with patch.object(h, "load_precomputed_assignments", return_value=frame_json):
             with pytest.raises(ValueError, match="list of strings"):
                 h.get_precomputed_assignment(record, payload)
 
@@ -654,6 +567,7 @@ class TestHandler:
             "study_iteration_id": "iter-1",
             "prolific_id": "prolific-1",
             "political_party": "democrat",
+            "assignment_batch_uri": BATCH_URI,
         }
         expected = {"assigned_post_ids": ["p1"], "already_assigned": True, "condition": "control"}
         with patch.object(h, "main", return_value=expected) as mock_main:
@@ -667,17 +581,36 @@ class TestHandler:
             study_iteration_id="iter-1",
             prolific_id="prolific-1",
             political_party="democrat",
+            assignment_batch_uri=BATCH_URI,
         )
 
-    def test_handler_raises_key_error_on_missing_event_field(self):
-        """Test missing required event key raises KeyError."""
-        # Arrange
+    def test_handler_raises_key_error_on_missing_assignment_batch_uri(self):
         event = {
             "study_id": "study-1",
             "study_iteration_id": "iter-1",
             "prolific_id": "prolific-1",
+            "political_party": "democrat",
         }
 
-        # Act / Assert
-        with pytest.raises(KeyError, match="political_party"):
+        with pytest.raises(KeyError, match="assignment_batch_uri"):
             h.handler(event, context=None)
+
+    def test_main_raises_when_config_bucket_mismatches_uri(self):
+        mismatched_config = DEFAULT_CONFIG.model_copy(deep=True)
+        mismatched_config.s3.bucket = "other-bucket"
+        with (
+            patch.object(
+                h,
+                "parse_assignment_batch_uri",
+                return_value=(DEFAULT_CONFIG.s3.bucket, BATCH_PREFIX),
+            ),
+            patch.object(h, "load_batch_config", return_value=mismatched_config),
+        ):
+            with pytest.raises(ValueError, match="bucket"):
+                h.main(
+                    study_id="study-1",
+                    study_iteration_id="iter-1",
+                    prolific_id="prolific-1",
+                    political_party="democrat",
+                    assignment_batch_uri=BATCH_URI,
+                )

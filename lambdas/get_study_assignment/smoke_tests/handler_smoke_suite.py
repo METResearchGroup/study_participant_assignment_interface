@@ -9,16 +9,20 @@ from typing import Any
 
 import boto3
 import pandas as pd
+import yaml
 from boto3.dynamodb.conditions import Key
 
-from jobs.mirrorview.constants import DEFAULT_BUCKET, DEFAULT_S3_PREFIX, OUTPUT_RECORDS_FILENAME
+from jobs.mirrorview.config_loader import load_mirrorview_config
+from jobs.mirrorview.constants import OUTPUT_RECORDS_FILENAME
 from jobs.mirrorview.generate_assignment_ids import generate_single_assignment_id
 from lambdas.get_study_assignment.smoke_tests.handler_invokers import HandlerInvoker
+from lib.constants import ROOT_DIR
 from lib.s3 import S3
 from lib.testing_utils import _assert_equal, _require_env
 from lib.timestamp_utils import get_current_timestamp
 
 TEST_ENV_PREFIX = "local-smoke"
+SMOKE_CONFIG = load_mirrorview_config(ROOT_DIR / "jobs/mirrorview/config/default.yaml")
 
 
 class HandlerSmokeTestBase:
@@ -43,8 +47,13 @@ class HandlerSmokeTestBase:
         self.user_assignments_table = dynamodb.Table(self.user_assignments_table_name)
         self.assignment_counter_table = dynamodb.Table(self.assignment_counter_table_name)
         self.s3_client: Any = boto3.client("s3", region_name=self.region_name)
-        self.s3_store = S3(bucket=DEFAULT_BUCKET, region_name=self.region_name)
+        self.s3_store = S3(bucket=SMOKE_CONFIG.s3.bucket, region_name=self.region_name)
         self.created_s3_keys: set[str] = set()
+        self.batch_key_prefix = (
+            f"{SMOKE_CONFIG.s3.prefix.rstrip('/')}/~handler-smoke/{self.study_iteration_id}"
+        )
+        self.assignment_batch_uri = f"s3://{SMOKE_CONFIG.s3.bucket}/{self.batch_key_prefix}"
+        self._seed_batch_config()
 
     def teardown(self) -> None:
         if not hasattr(self, "assignment_counter_table"):
@@ -62,7 +71,21 @@ class HandlerSmokeTestBase:
             "study_iteration_id": self.study_iteration_id,
             "prolific_id": prolific_id,
             "political_party": political_party,
+            "assignment_batch_uri": self.assignment_batch_uri,
         }
+
+    def _seed_batch_config(self) -> None:
+        config_key = f"{self.batch_key_prefix}/config.yaml"
+        config_bytes = yaml.safe_dump(
+            SMOKE_CONFIG.model_dump(),
+            sort_keys=False,
+        ).encode("utf-8")
+        self.s3_store.upload_bytes(
+            key=config_key,
+            body=config_bytes,
+            content_type="application/x-yaml",
+        )
+        self.created_s3_keys.add(config_key)
 
     def _seed_precomputed_csv(
         self,
@@ -90,10 +113,7 @@ class HandlerSmokeTestBase:
                 }
             )
 
-        key = (
-            f"{DEFAULT_S3_PREFIX}/~handler-smoke/{self.study_iteration_id}/"
-            f"{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
-        )
+        key = f"{self.batch_key_prefix}/{political_party}/{condition}/{OUTPUT_RECORDS_FILENAME}"
         csv_bytes = pd.DataFrame(records).to_csv(index=False).encode("utf-8")
         self.s3_store.upload_bytes(key=key, body=csv_bytes, content_type="text/csv")
         self.created_s3_keys.add(key)
@@ -171,7 +191,7 @@ class HandlerSmokeTestBase:
 
     def _cleanup_s3_fixture_objects(self) -> None:
         for key in sorted(self.created_s3_keys):
-            self.s3_client.delete_object(Bucket=DEFAULT_BUCKET, Key=key)
+            self.s3_client.delete_object(Bucket=SMOKE_CONFIG.s3.bucket, Key=key)
 
 
 class TestHandlerSmokeSuite(HandlerSmokeTestBase):

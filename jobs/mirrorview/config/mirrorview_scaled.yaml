@@ -1,0 +1,15 @@
+name: mirrorview_scaled
+input_posts_path: jobs/mirrorview/flip_datasets/mirrorview_scaled_2026_06_18/flips.csv
+local_data_dir: data/mirrorview
+random_seed: 42
+s3:
+  bucket: jspsych-mirror-view-4
+  prefix: precomputed_assignments
+parties:
+  - democrat
+  - republican
+conditions:
+  - training_assisted
+assignments_per_cell: 25000
+expected_total_unique_posts: 10000
+expected_min_assignments_per_post: 3

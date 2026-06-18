@@ -205,7 +205,7 @@ If you already have a suitable image in ECR (for example from another machine), 
 **Decisions to confirm before production apply**
 
 - **First Lambda create:** an image must exist for the resolved URI (default `...:latest` after you push `latest`, or whatever tag you set).
-- **`s3:ListBucket` scope:** current IAM allows listing the whole assignments bucket (`var.s3_assignments_bucket_name`, default `jspsych-mirror-view-3`). To narrow scope, add an IAM condition on `s3:prefix` aligned with mirrorview’s `precomputed_assignments` prefix in `jobs/mirrorview/constants.py`.
+- **`s3:ListBucket` / `s3:GetObject` scope:** IAM uses `var.s3_assignment_bucket_arns` (default includes `jspsych-mirror-view-3` and `jspsych-mirror-view-4`). This grants read access only; the Lambda selects the runtime bucket from each batch's uploaded `config.yaml` via `assignment_batch_uri`.
 
 ### 7. Apply the plan
 

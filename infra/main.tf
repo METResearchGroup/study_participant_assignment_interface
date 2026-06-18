@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "get_study_assignment_lambda_execution" {
       "s3:ListBucket",
     ]
     resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::${var.s3_assignments_bucket_name}",
+      for bucket_arn in var.s3_assignment_bucket_arns : bucket_arn
     ]
   }
 
@@ -116,7 +116,7 @@ data "aws_iam_policy_document" "get_study_assignment_lambda_execution" {
       "s3:GetObject",
     ]
     resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::${var.s3_assignments_bucket_name}/*",
+      for bucket_arn in var.s3_assignment_bucket_arns : "${bucket_arn}/*"
     ]
   }
 }
