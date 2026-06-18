@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir \
     "botocore>=1.34.0" \
     "numpy>=2.0.0" \
     "pandas>=3.0.2" \
-    "pydantic>=2.0.0"
+    "pydantic>=2.0.0" \
+    "pyyaml>=6.0.0"
 
 COPY lambdas ${LAMBDA_TASK_ROOT}/lambdas
 COPY lib ${LAMBDA_TASK_ROOT}/lib
