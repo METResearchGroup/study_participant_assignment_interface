@@ -29,6 +29,11 @@ def test_scaled_config_parses_two_cells_with_25000_rows() -> None:
         ("democrat", "training_assisted", 25000),
         ("republican", "training_assisted", 25000),
     ]
+    assert config.input_posts_path == (
+        "jobs/mirrorview/flip_datasets/mirrorview_scaled_2026_06_18/flips.csv"
+    )
+    assert config.expected_total_unique_posts == 10000
+    assert config.expected_min_assignments_per_post == 3
 
 
 def test_expected_relative_csv_paths_for_scaled_config() -> None:

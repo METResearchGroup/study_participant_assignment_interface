@@ -31,6 +31,8 @@ class MirrorViewConfig(BaseModel):
     conditions: list[str] | None = None
     assignments_per_cell: int | None = None
     cells: list[AssignmentCell] | None = None
+    expected_total_unique_posts: int | None = None
+    expected_min_assignments_per_post: int | None = None
 
     @model_validator(mode="after")
     def validate_cell_spec(self) -> MirrorViewConfig:
