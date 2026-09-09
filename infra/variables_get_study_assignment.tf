@@ -29,6 +29,7 @@ variable "s3_assignment_bucket_arns" {
   default = [
     "arn:aws:s3:::jspsych-mirror-view-3",
     "arn:aws:s3:::jspsych-mirror-view-4",
+    "arn:aws:s3:::jspsych-mirror-view-2026-09-09",
   ]
 }
 
